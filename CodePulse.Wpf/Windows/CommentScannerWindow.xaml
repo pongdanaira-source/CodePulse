@@ -1,0 +1,228 @@
+<Window x:Class="CodePulse.Wpf.Windows.CommentScannerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Comment Scanner"
+        Icon="/Assets/app-icon.ico"
+        Width="620"
+        MinWidth="620"
+        Height="590"
+        MinHeight="560"
+        ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}">
+    <Border Margin="14"
+            Padding="0"
+            Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="18">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Margin="16,16,16,0"
+                    Padding="16"
+                    Background="{StaticResource HeroBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="148" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <Border HorizontalAlignment="Left"
+                                Padding="10,4"
+                                Background="#153A4347"
+                                BorderBrush="#3C5B656A"
+                                BorderThickness="1"
+                                CornerRadius="7">
+                            <TextBlock Foreground="{StaticResource AccentBrush}"
+                                       FontSize="11"
+                                       FontWeight="Bold"
+                                       Text="OWNER COMMENTS" />
+                        </Border>
+                        <TextBlock Margin="0,10,0,0"
+                                   FontSize="25"
+                                   FontWeight="SemiBold"
+                                   Text="Comment Scanner" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="12"
+                                   Text="Poll owner comments and dispatch matching codes."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Border Grid.Column="1"
+                            Margin="14,0,0,0"
+                            Padding="12"
+                            Background="#18000000"
+                            BorderBrush="#2E3D4348"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11"
+                                       Text="Status" />
+                            <TextBlock x:Name="SelectedStatusTextBlock"
+                                       Margin="0,8,0,0"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Text="Ready" />
+                            <TextBlock x:Name="SelectedStatusHintTextBlock"
+                                       Margin="0,4,0,0"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11"
+                                       Text="Paste a link to start."
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2"
+                  Margin="16,0,16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.25*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="0.75*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Padding="14"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                    <StackPanel>
+                        <TextBlock Foreground="{StaticResource MutedBrush}"
+                                   FontSize="11"
+                                   Text="Channel" />
+                        <ComboBox x:Name="ChannelComboBox"
+                                  Margin="0,8,0,0"
+                                  MinHeight="40"
+                                  DisplayMemberPath="Name"
+                                  SelectionChanged="ChannelComboBox_OnSelectionChanged" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2"
+                        Padding="14"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                    <StackPanel>
+                        <TextBlock Foreground="{StaticResource MutedBrush}"
+                                   FontSize="11"
+                                   Text="Polling interval" />
+                        <ComboBox x:Name="PollIntervalComboBox"
+                                  Margin="0,8,0,0"
+                                  MinHeight="40"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Seconds"
+                                  SelectionChanged="PollIntervalComboBox_OnSelectionChanged" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="4"
+                    Margin="16,0,16,0"
+                    Padding="14"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="11"
+                                   Text="Video URL or ID" />
+                        <Border Grid.Column="1"
+                                Padding="8,3"
+                                Background="#182D3940"
+                                BorderBrush="#3046525A"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11"
+                                       Text="watch, youtu.be, live" />
+                        </Border>
+                    </Grid>
+                    <TextBox x:Name="VideoUrlTextBox"
+                             Margin="0,8,0,0"
+                             MinHeight="42"
+                             Padding="12,8"
+                             VerticalContentAlignment="Center"
+                             TextChanged="VideoUrlTextBox_OnTextChanged" />
+                    <TextBlock Margin="0,6,0,0"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="11"
+                               Text="Supports watch links, live links, short links, and raw video IDs."
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="6"
+                    Margin="16,0,16,16"
+                    Padding="14,12,14,14"
+                    Background="{StaticResource PanelAltBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="12"
+                               Text="Owner comments only" />
+
+                    <Button Grid.Column="1"
+                            Width="108"
+                            Padding="18,9"
+                            Click="CloseButton_OnClick"
+                            Content="Close" />
+
+                    <Button Grid.Column="3"
+                            x:Name="StopButton"
+                            Width="108"
+                            Padding="18,9"
+                            Click="StopButton_OnClick"
+                            Content="Stop" />
+
+                    <Button Grid.Column="5"
+                            x:Name="StartButton"
+                            Width="118"
+                            Padding="18,9"
+                            Click="StartButton_OnClick"
+                            Content="Start"
+                            Style="{StaticResource AccentButtonStyle}" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

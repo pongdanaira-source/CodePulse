@@ -1,0 +1,83 @@
+<Window x:Class="CodePulse.Wpf.Windows.QuickCaptureLauncherWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Quick Capture"
+        Icon="/Assets/app-icon.ico"
+        Width="430"
+        MinWidth="430"
+        MinHeight="260"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        Background="{StaticResource AppBackgroundBrush}">
+    <Border Margin="14"
+            Padding="18"
+            Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="18">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Text="Quick Capture" />
+
+            <StackPanel Grid.Row="2">
+                <TextBlock Margin="0,0,0,8"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="11"
+                           Text="Channel" />
+                <ComboBox x:Name="ChannelComboBox"
+                          DisplayMemberPath="Name"
+                          SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                          SelectionChanged="ChannelComboBox_OnSelectionChanged" />
+                <TextBlock Margin="0,8,0,0"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="11"
+                           Text="Capture sends one region. Scan keeps watching a newly selected region." />
+            </StackPanel>
+
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="1"
+                        x:Name="CancelButton"
+                        Width="110"
+                        Padding="18,10"
+                        Click="CancelButton_OnClick"
+                        Content="Cancel" />
+
+                <Button Grid.Column="3"
+                        x:Name="CaptureButton"
+                        Width="110"
+                        Padding="20,10"
+                        Click="CaptureButton_OnClick"
+                        Content="Capture"
+                        Style="{StaticResource AccentButtonStyle}" />
+
+                <Button Grid.Column="5"
+                        x:Name="ScanButton"
+                        Width="110"
+                        Padding="20,10"
+                        Click="ScanButton_OnClick"
+                        Content="Scan" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,35 @@
+# IDE / editor
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+**/bin/
+**/obj/
+publish/
+TestResults/
+*.nupkg
+
+# Local runtime and debug data
+runtime-debug/
+logs/
+*.log
+*.tmp
+*.cache
+
+# Local tooling / snapshots
+.dotnet-cli-home/
+_snapshots/
+_tmpbuild_verify_*/
+_tmp_resolve_check/
+
+# Handoff notes can include private logs, tokens, and API keys.
+GPT-HANDOFF.md
+
+# OS files
+.DS_Store
+Thumbs.db

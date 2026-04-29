@@ -1,0 +1,106 @@
+<Window x:Class="CodePulse.Wpf.Windows.ScreenCaptureOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Capture overlay"
+        AllowsTransparency="True"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Background="Transparent"
+        Cursor="Cross"
+        KeyDown="Window_OnKeyDown"
+        MouseLeftButtonDown="Window_OnMouseLeftButtonDown"
+        MouseLeftButtonUp="Window_OnMouseLeftButtonUp"
+        MouseRightButtonUp="Window_OnMouseRightButtonUp"
+        MouseMove="Window_OnMouseMove">
+    <Grid x:Name="RootGrid"
+          Focusable="True">
+        <Image x:Name="FrozenScreenImage"
+               Stretch="Fill"
+               SnapsToDevicePixels="True" />
+
+        <Rectangle Fill="#4A081114" />
+
+        <Canvas x:Name="RootCanvas"
+                Focusable="True">
+        <Border x:Name="HintBadge"
+                Canvas.Left="24"
+                Canvas.Top="24"
+                Padding="12,6"
+                Background="#DD10181B"
+                BorderBrush="#80F6BE59"
+                BorderThickness="1"
+                CornerRadius="10">
+            <TextBlock Foreground="#FFF6BE59"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Text="Drag to select a capture region | Right-click or Esc to cancel" />
+        </Border>
+
+        <Ellipse x:Name="SelectionStartDot"
+                 Visibility="Collapsed"
+                 Width="14"
+                 Height="14"
+                 Fill="#FFF6BE59"
+                 Stroke="#FFFEF4D8"
+                 StrokeThickness="2" />
+
+        <Border x:Name="SelectionInfoBadge"
+                Visibility="Collapsed"
+                Padding="10,5"
+                Background="#E610181B"
+                BorderBrush="#80F6BE59"
+                BorderThickness="1"
+                CornerRadius="9">
+            <TextBlock x:Name="SelectionInfoText"
+                       Foreground="#FFF6BE59"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Text="0 x 0" />
+        </Border>
+
+        <Rectangle x:Name="SelectionFill"
+                   Visibility="Collapsed"
+                   Fill="#3AF6BE59"
+                   StrokeThickness="0" />
+
+        <Rectangle x:Name="SelectionBorder"
+                   Visibility="Collapsed"
+                   Stroke="#FFF6BE59"
+                   StrokeThickness="2.5"
+                   RadiusX="8"
+                   RadiusY="8"
+                   SnapsToDevicePixels="True" />
+
+        <Ellipse x:Name="SelectionHandleTopLeft"
+                 Visibility="Collapsed"
+                 Width="8"
+                 Height="8"
+                 Fill="#FFFEF4D8"
+                 Stroke="#FFF6BE59"
+                 StrokeThickness="1.5" />
+        <Ellipse x:Name="SelectionHandleTopRight"
+                 Visibility="Collapsed"
+                 Width="8"
+                 Height="8"
+                 Fill="#FFFEF4D8"
+                 Stroke="#FFF6BE59"
+                 StrokeThickness="1.5" />
+        <Ellipse x:Name="SelectionHandleBottomLeft"
+                 Visibility="Collapsed"
+                 Width="8"
+                 Height="8"
+                 Fill="#FFFEF4D8"
+                 Stroke="#FFF6BE59"
+                 StrokeThickness="1.5" />
+        <Ellipse x:Name="SelectionHandleBottomRight"
+                 Visibility="Collapsed"
+                 Width="8"
+                 Height="8"
+                 Fill="#FFFEF4D8"
+                 Stroke="#FFF6BE59"
+                 StrokeThickness="1.5" />
+        </Canvas>
+    </Grid>
+</Window>
