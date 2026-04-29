@@ -11,6 +11,7 @@ obj/
 **/bin/
 **/obj/
 publish/
+artifacts/
 TestResults/
 *.nupkg
 
