@@ -143,14 +143,14 @@ public sealed class LineTargetWindowService
 
     private static string GetBestWindowTitle(IntPtr handle)
     {
-        var automationTitle = GetAutomationWindowTitle(handle);
-        if (!string.IsNullOrWhiteSpace(automationTitle) && !LooksGarbled(automationTitle))
+        var win32Title = GetWindowTitle(handle);
+        if (!string.IsNullOrWhiteSpace(win32Title) && !LooksGarbled(win32Title))
         {
-            return automationTitle;
+            return win32Title;
         }
 
-        var win32Title = GetWindowTitle(handle);
-        return !string.IsNullOrWhiteSpace(win32Title) ? win32Title : automationTitle;
+        var automationTitle = GetAutomationWindowTitle(handle);
+        return !string.IsNullOrWhiteSpace(automationTitle) ? automationTitle : win32Title;
     }
 
     private static string GetAutomationWindowTitle(IntPtr handle)
