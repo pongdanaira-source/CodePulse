@@ -38,6 +38,7 @@ public partial class SettingsWindow : Window
         SendManualCaptureImageCheckBox.IsChecked = settings.Dispatch.SendManualCaptureImage;
         SaveManualCaptureImageToTempInDryRunCheckBox.IsChecked = settings.Dispatch.SaveManualCaptureImageToTempInDryRun;
         PasteDelayTextBox.Text = settings.Dispatch.PasteDelayMs.ToString();
+        FacebookTargetUrlTextBox.Text = settings.Dispatch.FacebookTargetUrl;
         EnableOcrDebugLogCheckBox.IsChecked = settings.EnableOcrDebugLog;
         EnableOcrSpaceFallbackCheckBox.IsChecked = settings.EnableOcrSpaceFallback;
         OcrSpaceApiKeyTextBox.Text = settings.OcrSpaceApiKey;
@@ -83,6 +84,7 @@ public partial class SettingsWindow : Window
         destination.Dispatch.PasteDelayMs = source.Dispatch.PasteDelayMs;
         destination.Dispatch.LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword;
         destination.Dispatch.FacebookTargetTitleKeyword = source.Dispatch.FacebookTargetTitleKeyword;
+        destination.Dispatch.FacebookTargetUrl = source.Dispatch.FacebookTargetUrl;
         destination.EnableOcrDebugLog = source.EnableOcrDebugLog;
         destination.EnableOcrSpaceFallback = source.EnableOcrSpaceFallback;
         destination.OcrSpaceApiKey = source.OcrSpaceApiKey;
@@ -250,6 +252,7 @@ public partial class SettingsWindow : Window
         result.Dispatch.SendManualCaptureImage = SendManualCaptureImageCheckBox.IsChecked == true;
         result.Dispatch.SaveManualCaptureImageToTempInDryRun = SaveManualCaptureImageToTempInDryRunCheckBox.IsChecked == true;
         result.Dispatch.PasteDelayMs = pasteDelayMs;
+        result.Dispatch.FacebookTargetUrl = FacebookTargetUrlTextBox.Text.Trim();
         result.EnableOcrDebugLog = EnableOcrDebugLogCheckBox.IsChecked == true;
         result.EnableOcrSpaceFallback = EnableOcrSpaceFallbackCheckBox.IsChecked == true;
         result.OcrSpaceApiKey = OcrSpaceApiKeyTextBox.Text.Trim();

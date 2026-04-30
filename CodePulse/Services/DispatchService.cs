@@ -171,7 +171,9 @@ public sealed class DispatchService
                 anySuccess |= HandleDesktopResult(
                     result,
                     targetName: "Facebook",
-                    notFoundMessage: "[Facebook] ไม่พบ Facebook/Messenger ที่เปิดอยู่");
+                    notFoundMessage: string.IsNullOrWhiteSpace(_settings.Dispatch.FacebookTargetUrl)
+                        ? "[Facebook] ไม่พบ Facebook/Messenger ที่เปิดอยู่"
+                        : "[Facebook] ไม่พบ browser tab ที่เปิด Messenger target URL");
             }
 
             return anySuccess;

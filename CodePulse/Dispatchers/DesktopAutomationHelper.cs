@@ -205,6 +205,47 @@ internal static class DesktopAutomationHelper
         return false;
     }
 
+    public static bool TryGetBrowserAddress(WindowHandleInfo window, out string address)
+    {
+        address = string.Empty;
+        if (!IsBrowserProcess(window.ProcessName))
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = AutomationElement.FromHandle(window.Handle);
+            if (root is null)
+            {
+                return false;
+            }
+
+            var edits = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+            foreach (AutomationElement edit in edits)
+            {
+                if (!edit.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) ||
+                    pattern is not ValuePattern valuePattern)
+                {
+                    continue;
+                }
+
+                var value = valuePattern.Current.Value?.Trim();
+                if (!string.IsNullOrWhiteSpace(value) && IsLikelyWebAddress(value))
+                {
+                    address = value;
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
     private static WindowHandleInfo? FindWindow(Func<WindowHandleInfo, bool> matchWindow)
     {
         WindowHandleInfo? result = null;
@@ -250,6 +291,28 @@ internal static class DesktopAutomationHelper
     {
         return !string.IsNullOrWhiteSpace(value) &&
                value.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBrowserProcess(string processName)
+    {
+        return processName.Equals("chrome", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("msedge", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("firefox", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("brave", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("opera", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLikelyWebAddress(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+               value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+               value.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("facebook.com/messages/t/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ActivateWindow(IntPtr handle)

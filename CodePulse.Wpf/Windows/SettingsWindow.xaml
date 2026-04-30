@@ -156,12 +156,14 @@
                         <TextBlock Margin="0,2,0,0"
                                    Foreground="{StaticResource MutedBrush}"
                                    FontSize="12"
-                                   Text="Test dispatch is always a dry-run. Desktop dispatch now sends to the first matching LINE/Facebook window without room keyword verification."
+                                   Text="Test dispatch is always a dry-run. Facebook can be locked to a Messenger room URL; if the URL is configured and not open, Facebook dispatch is skipped."
                                    TextWrapping="Wrap" />
 
                         <Grid Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0">
@@ -170,6 +172,19 @@
                                            Text="Paste delay (ms)" />
                                 <TextBox x:Name="PasteDelayTextBox"
                                          Margin="0,8,0,0" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="12"
+                                           Text="Facebook Messenger target URL" />
+                                <TextBox x:Name="FacebookTargetUrlTextBox"
+                                         Margin="0,8,0,0" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="11"
+                                           Text="Example: https://www.facebook.com/messages/t/26657469643882596"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>

@@ -24,6 +24,8 @@ public sealed class DispatchSettings
 
     public string FacebookTargetTitleKeyword { get; set; } = "Messenger";
 
+    public string FacebookTargetUrl { get; set; } = string.Empty;
+
     public bool EnableDryRun { get; set; }
 
     public bool SendManualCaptureImage { get; set; }
