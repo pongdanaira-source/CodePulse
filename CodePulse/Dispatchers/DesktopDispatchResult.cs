@@ -14,5 +14,7 @@ public sealed class DesktopDispatchResult
 
     public bool VerificationSkipped { get; init; }
 
+    public bool TargetNotSelected { get; init; }
+
     public bool DryRun { get; init; }
 }

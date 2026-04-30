@@ -203,6 +203,12 @@ public sealed class DispatchService
             return false;
         }
 
+        if (result.TargetNotSelected)
+        {
+            LogEmitted?.Invoke($"[{targetName}] ข้ามการส่ง เพราะยังไม่ได้เลือกหน้าต่างเป้าหมาย");
+            return false;
+        }
+
         if (!result.WindowFound)
         {
             if (_settings.Dispatch.SkipIfWindowNotFound)

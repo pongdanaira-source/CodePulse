@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using CodePulse.Dispatchers;
 using CodePulse.Models;
 using CodePulse.Enums;
 using CodePulse.Services;
@@ -12,13 +13,27 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettings _draft;
     private readonly Func<AppSettings, Task<bool>> _testDispatchAsync;
+    private readonly Func<IReadOnlyList<WindowHandleInfo>> _getLineTargetWindows;
+    private readonly Action<WindowHandleInfo> _selectLineTargetWindow;
+    private readonly Action _clearLineTargetWindow;
+    private readonly Func<string> _getLineTargetWindowText;
     private readonly List<TextBox> _youTubeBackupKeyTextBoxes = new();
 
-    public SettingsWindow(AppSettings draft, Func<AppSettings, Task<bool>> testDispatchAsync)
+    public SettingsWindow(
+        AppSettings draft,
+        Func<AppSettings, Task<bool>> testDispatchAsync,
+        Func<IReadOnlyList<WindowHandleInfo>> getLineTargetWindows,
+        Action<WindowHandleInfo> selectLineTargetWindow,
+        Action clearLineTargetWindow,
+        Func<string> getLineTargetWindowText)
     {
         InitializeComponent();
         _draft = draft;
         _testDispatchAsync = testDispatchAsync;
+        _getLineTargetWindows = getLineTargetWindows;
+        _selectLineTargetWindow = selectLineTargetWindow;
+        _clearLineTargetWindow = clearLineTargetWindow;
+        _getLineTargetWindowText = getLineTargetWindowText;
 
         BindFromSettings(_draft);
     }
@@ -39,6 +54,7 @@ public partial class SettingsWindow : Window
         SaveManualCaptureImageToTempInDryRunCheckBox.IsChecked = settings.Dispatch.SaveManualCaptureImageToTempInDryRun;
         PasteDelayTextBox.Text = settings.Dispatch.PasteDelayMs.ToString();
         FacebookTargetUrlTextBox.Text = settings.Dispatch.FacebookTargetUrl;
+        RefreshLineTargetText();
         EnableOcrDebugLogCheckBox.IsChecked = settings.EnableOcrDebugLog;
         EnableOcrSpaceFallbackCheckBox.IsChecked = settings.EnableOcrSpaceFallback;
         OcrSpaceApiKeyTextBox.Text = settings.OcrSpaceApiKey;
@@ -117,6 +133,26 @@ public partial class SettingsWindow : Window
     private void CancelButton_OnClick(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void PickLineWindowButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new LineWindowPickerWindow(_getLineTargetWindows)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true && dialog.SelectedWindow is WindowHandleInfo selectedWindow)
+        {
+            _selectLineTargetWindow(selectedWindow);
+            RefreshLineTargetText();
+        }
+    }
+
+    private void ClearLineWindowButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _clearLineTargetWindow();
+        RefreshLineTargetText();
     }
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)
@@ -221,6 +257,11 @@ public partial class SettingsWindow : Window
     {
         StatusTextBlock.Text = message;
         MessageBox.Show(this, message, "Settings", MessageBoxButton.OK, icon);
+    }
+
+    private void RefreshLineTargetText()
+    {
+        LineTargetWindowTextBlock.Text = _getLineTargetWindowText();
     }
 
     private bool TryBuildResult(out AppSettings result, out string validationMessage)

@@ -28,6 +28,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     private readonly OcrScanWorkflowService _ocrScanWorkflowService;
     private readonly YouTubeCommentScannerService _commentScannerService;
     private readonly DispatchService _dispatchService;
+    private readonly LineTargetWindowService _lineTargetWindowService;
     private readonly ObservableCollection<ChannelProfile> _channels = new();
     private readonly ObservableCollection<AppLogEntry> _logEntries = new();
     private readonly Dictionary<Guid, CancellationTokenSource> _boostTokens = new();
@@ -53,7 +54,8 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var ocrService = new OcrService(_settings);
         var soundAlertService = new SoundAlertService();
         var telegramDispatcher = new TelegramDispatcher(_settings, telegramBotClient);
-        var lineDispatcher = new LineDispatcher(_settings);
+        _lineTargetWindowService = new LineTargetWindowService();
+        var lineDispatcher = new LineDispatcher(_settings, _lineTargetWindowService);
         var facebookDispatcher = new FacebookDispatcher(_settings);
         _dispatchService = new DispatchService(
             _settings,
@@ -177,6 +179,8 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
     public int WatchingChannels => _channels.Count(channel =>
         channel.Status is SessionState.LoadingChat or SessionState.Watching or SessionState.NoMessages);
+
+    public string LineTargetWindowText => _lineTargetWindowService.SelectedWindowText;
 
     public string SelectedChannelName => SelectedChannel?.Name ?? "No channel selected";
 
@@ -421,6 +425,25 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     public AppSettings CreateSettingsDraft()
     {
         return CloneSettings(_settings);
+    }
+
+    public IReadOnlyList<WindowHandleInfo> GetLineTargetWindows()
+    {
+        return _lineTargetWindowService.GetLineWindows();
+    }
+
+    public void SelectLineTargetWindow(WindowHandleInfo window)
+    {
+        _lineTargetWindowService.Select(window);
+        _appLogService.Write($"[LINE] เลือกหน้าต่างเป้าหมาย: {window.Title}");
+        OnPropertyChanged(nameof(LineTargetWindowText));
+    }
+
+    public void ClearLineTargetWindow()
+    {
+        _lineTargetWindowService.Clear();
+        _appLogService.Write("[LINE] ล้างหน้าต่างเป้าหมายแล้ว");
+        OnPropertyChanged(nameof(LineTargetWindowText));
     }
 
     public void SaveSettings(AppSettings updatedSettings)

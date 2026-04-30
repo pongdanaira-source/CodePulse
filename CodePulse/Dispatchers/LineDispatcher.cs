@@ -1,24 +1,37 @@
 using System.Drawing;
 using CodePulse.Models;
+using CodePulse.Services;
 
 namespace CodePulse.Dispatchers;
 
 public sealed class LineDispatcher
 {
     private readonly AppSettings _settings;
+    private readonly LineTargetWindowService _lineTargetWindowService;
 
-    public LineDispatcher(AppSettings settings)
+    public LineDispatcher(AppSettings settings, LineTargetWindowService lineTargetWindowService)
     {
         _settings = settings;
+        _lineTargetWindowService = lineTargetWindowService;
     }
 
     public Task<DesktopDispatchResult> TryDispatchAsync(CodeDetectedEvent detectedEvent, CancellationToken cancellationToken)
     {
-        return DesktopAutomationHelper.DispatchToWindowAsync(
+        if (!_lineTargetWindowService.TryGetSelectedLiveWindow(out var selectedWindow))
+        {
+            return Task.FromResult(new DesktopDispatchResult
+            {
+                Success = false,
+                WindowFound = false,
+                TargetNotSelected = true
+            });
+        }
+
+        return DesktopAutomationHelper.DispatchToHandleAsync(
             detectedEvent.Candidate.Value,
             _settings.Dispatch.PasteDelayMs,
             _settings.Dispatch.EnterAfterPaste,
-            static window => string.Equals(window.ProcessName, "LINE", StringComparison.OrdinalIgnoreCase),
+            selectedWindow,
             cancellationToken,
             focusPoints:
             [

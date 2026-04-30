@@ -159,6 +159,33 @@ internal static class DesktopAutomationHelper
         return completionSource.Task;
     }
 
+    public static Task<DesktopDispatchResult> DispatchToHandleAsync(
+        string payload,
+        int pasteDelayMs,
+        bool enterAfterPaste,
+        WindowHandleInfo window,
+        CancellationToken cancellationToken,
+        IReadOnlyList<PointF>? focusPoints = null,
+        bool typeFallback = false,
+        bool moveCursorToBottomOnComplete = false,
+        PointF? completionCursorPoint = null,
+        bool minimizeWindowOnComplete = false,
+        bool dryRun = false)
+    {
+        return DispatchToWindowAsync(
+            payload,
+            pasteDelayMs,
+            enterAfterPaste,
+            candidate => candidate.Handle == window.Handle,
+            cancellationToken,
+            focusPoints,
+            typeFallback,
+            moveCursorToBottomOnComplete,
+            completionCursorPoint,
+            minimizeWindowOnComplete,
+            dryRun);
+    }
+
     public static bool WindowContainsText(IntPtr handle, string keyword, int maxElements = 250)
     {
         if (string.IsNullOrWhiteSpace(keyword))
@@ -522,4 +549,4 @@ internal static class DesktopAutomationHelper
     private readonly record struct ClipboardBackup(bool HasText, string Text);
 }
 
-internal readonly record struct WindowHandleInfo(IntPtr Handle, string Title, string ProcessName);
+public readonly record struct WindowHandleInfo(IntPtr Handle, string Title, string ProcessName);

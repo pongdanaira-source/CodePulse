@@ -153,6 +153,48 @@
                                       Content="Save manual capture image to Temp in dry run" />
                         </WrapPanel>
 
+                        <Border Margin="0,8,0,0"
+                                Background="#111A1D"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="14"
+                                Padding="14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="LINE target window" />
+                                    <TextBlock x:Name="LineTargetWindowTextBlock"
+                                               Margin="0,6,0,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,6,0,0"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11"
+                                               Text="Session only. CodePulse clears this target when the app closes."
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <Button Grid.Column="1"
+                                        Width="150"
+                                        VerticalAlignment="Center"
+                                        Click="PickLineWindowButton_OnClick"
+                                        Content="Pick LINE window" />
+                                <Button Grid.Column="3"
+                                        Width="92"
+                                        VerticalAlignment="Center"
+                                        Click="ClearLineWindowButton_OnClick"
+                                        Content="Clear" />
+                            </Grid>
+                        </Border>
+
                         <TextBlock Margin="0,2,0,0"
                                    Foreground="{StaticResource MutedBrush}"
                                    FontSize="12"

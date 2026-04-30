@@ -90,7 +90,13 @@ public partial class MainWindow : Window
 
     private void SettingsButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsWindow(_viewModel.CreateSettingsDraft(), _viewModel.TestDispatchAsync)
+        var dialog = new SettingsWindow(
+            _viewModel.CreateSettingsDraft(),
+            _viewModel.TestDispatchAsync,
+            _viewModel.GetLineTargetWindows,
+            _viewModel.SelectLineTargetWindow,
+            _viewModel.ClearLineTargetWindow,
+            () => _viewModel.LineTargetWindowText)
         {
             Owner = this
         };
