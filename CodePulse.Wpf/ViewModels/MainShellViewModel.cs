@@ -802,6 +802,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
                 SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound,
                 PasteDelayMs = source.Dispatch.PasteDelayMs,
                 EnterAfterPaste = source.Dispatch.EnterAfterPaste,
+                EnableSafeDesktopPaste = source.Dispatch.EnableSafeDesktopPaste,
                 EnableDesktopTargetVerification = false,
                 LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword,
                 LineTargetWindowTitle = source.Dispatch.LineTargetWindowTitle,
@@ -833,6 +834,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.Dispatch.SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound;
         destination.Dispatch.PasteDelayMs = source.Dispatch.PasteDelayMs;
         destination.Dispatch.EnterAfterPaste = source.Dispatch.EnterAfterPaste;
+        destination.Dispatch.EnableSafeDesktopPaste = source.Dispatch.EnableSafeDesktopPaste;
         destination.Dispatch.EnableDesktopTargetVerification = false;
         destination.Dispatch.LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword;
         destination.Dispatch.LineTargetWindowTitle = source.Dispatch.LineTargetWindowTitle;

@@ -142,6 +142,9 @@
                             <CheckBox x:Name="EnterAfterPasteCheckBox"
                                       Margin="0,0,22,12"
                                       Content="Press Enter after paste" />
+                            <CheckBox x:Name="EnableSafeDesktopPasteCheckBox"
+                                      Margin="0,0,22,12"
+                                      Content="Safe desktop paste" />
                             <CheckBox x:Name="EnableDryRunCheckBox"
                                       Margin="0,0,22,12"
                                       Content="Dry run mode" />
@@ -178,7 +181,7 @@
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{StaticResource MutedBrush}"
                                                FontSize="11"
-                                               Text="Session only. CodePulse clears this target when the app closes."
+                                               Text="Saved by title. CodePulse restores it on startup when the same LINE window is open."
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 

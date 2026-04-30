@@ -14,6 +14,7 @@ internal static class DesktopAutomationHelper
     private const int FocusPointDelayMs = 25;
     private const int TypeFallbackStepDelayMs = 15;
     private const int CompletionStepDelayMs = 10;
+    private const int SafePasteActivationDelayMs = 80;
 
     public static Task<DesktopDispatchResult> DispatchToWindowAsync(
         string payload,
@@ -27,6 +28,7 @@ internal static class DesktopAutomationHelper
         PointF? completionCursorPoint = null,
         bool minimizeWindowOnComplete = false,
         bool dryRun = false,
+        bool safePaste = true,
         Func<WindowHandleInfo, bool>? verificationPredicate = null)
     {
         var completionSource = new TaskCompletionSource<DesktopDispatchResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -76,8 +78,20 @@ internal static class DesktopAutomationHelper
                 }
 
                 ActivateWindow(window.Value.Handle);
-                Thread.Sleep(Math.Max(MinimumActivationDelayMs, pasteDelayMs));
+                Thread.Sleep(Math.Max(safePaste ? SafePasteActivationDelayMs : MinimumActivationDelayMs, pasteDelayMs));
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                {
+                    completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "target window did not become active"));
+                    return;
+                }
+
+                if (safePaste)
+                {
+                    SendKeys.SendWait("{ESC}");
+                    Thread.Sleep(TypeFallbackStepDelayMs);
+                }
 
                 clipboardBackup = TryBackupClipboard();
 
@@ -88,6 +102,12 @@ internal static class DesktopAutomationHelper
                         ClickInsideWindow(window.Value.Handle, focusPoint);
                         Thread.Sleep(FocusPointDelayMs);
                     }
+                }
+
+                if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                {
+                    completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "active window changed before paste"));
+                    return;
                 }
 
                 SetClipboardText(payload.Trim());
@@ -104,6 +124,12 @@ internal static class DesktopAutomationHelper
                 if (enterAfterPaste)
                 {
                     Thread.Sleep(TypeFallbackStepDelayMs);
+                    if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                    {
+                        completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "active window changed before enter"));
+                        return;
+                    }
+
                     SendKeys.SendWait("{ENTER}");
                 }
 
@@ -170,7 +196,8 @@ internal static class DesktopAutomationHelper
         bool moveCursorToBottomOnComplete = false,
         PointF? completionCursorPoint = null,
         bool minimizeWindowOnComplete = false,
-        bool dryRun = false)
+        bool dryRun = false,
+        bool safePaste = true)
     {
         return DispatchToWindowAsync(
             payload,
@@ -183,7 +210,8 @@ internal static class DesktopAutomationHelper
             moveCursorToBottomOnComplete,
             completionCursorPoint,
             minimizeWindowOnComplete,
-            dryRun);
+            dryRun,
+            safePaste);
     }
 
     public static bool WindowContainsText(IntPtr handle, string keyword, int maxElements = 250)
@@ -345,6 +373,23 @@ internal static class DesktopAutomationHelper
                value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
                value.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ||
                value.Contains("facebook.com/messages/t/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DesktopDispatchResult CreateUnsafeDesktopResult(WindowHandleInfo window, string reason)
+    {
+        return new DesktopDispatchResult
+        {
+            Success = false,
+            WindowFound = true,
+            WindowTitle = window.Title,
+            WindowProcessName = window.ProcessName,
+            ErrorMessage = $"Safe paste skipped: {reason}"
+        };
+    }
+
+    private static bool IsForegroundWindow(IntPtr handle)
+    {
+        return GetForegroundWindow() == handle;
     }
 
     private static void ActivateWindow(IntPtr handle)
@@ -513,6 +558,9 @@ internal static class DesktopAutomationHelper
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);

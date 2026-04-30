@@ -18,6 +18,8 @@ public sealed class DispatchSettings
 
     public bool EnterAfterPaste { get; set; } = true;
 
+    public bool EnableSafeDesktopPaste { get; set; } = true;
+
     public bool EnableDesktopTargetVerification { get; set; }
 
     public string LineTargetTitleKeyword { get; set; } = "LINE";

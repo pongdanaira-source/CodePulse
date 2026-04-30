@@ -49,6 +49,7 @@ public partial class SettingsWindow : Window
         EnableFacebookCheckBox.IsChecked = settings.Dispatch.EnableFacebook;
         SkipIfWindowNotFoundCheckBox.IsChecked = settings.Dispatch.SkipIfWindowNotFound;
         EnterAfterPasteCheckBox.IsChecked = settings.Dispatch.EnterAfterPaste;
+        EnableSafeDesktopPasteCheckBox.IsChecked = settings.Dispatch.EnableSafeDesktopPaste;
         EnableDryRunCheckBox.IsChecked = settings.Dispatch.EnableDryRun;
         SendManualCaptureImageCheckBox.IsChecked = settings.Dispatch.SendManualCaptureImage;
         SaveManualCaptureImageToTempInDryRunCheckBox.IsChecked = settings.Dispatch.SaveManualCaptureImageToTempInDryRun;
@@ -93,6 +94,7 @@ public partial class SettingsWindow : Window
         destination.Dispatch.EnableFacebook = source.Dispatch.EnableFacebook;
         destination.Dispatch.SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound;
         destination.Dispatch.EnterAfterPaste = source.Dispatch.EnterAfterPaste;
+        destination.Dispatch.EnableSafeDesktopPaste = source.Dispatch.EnableSafeDesktopPaste;
         destination.Dispatch.EnableDesktopTargetVerification = false;
         destination.Dispatch.EnableDryRun = source.Dispatch.EnableDryRun;
         destination.Dispatch.SendManualCaptureImage = source.Dispatch.SendManualCaptureImage;
@@ -291,6 +293,7 @@ public partial class SettingsWindow : Window
         result.Dispatch.EnableFacebook = EnableFacebookCheckBox.IsChecked == true;
         result.Dispatch.SkipIfWindowNotFound = SkipIfWindowNotFoundCheckBox.IsChecked == true;
         result.Dispatch.EnterAfterPaste = EnterAfterPasteCheckBox.IsChecked == true;
+        result.Dispatch.EnableSafeDesktopPaste = EnableSafeDesktopPasteCheckBox.IsChecked == true;
         result.Dispatch.EnableDesktopTargetVerification = false;
         result.Dispatch.EnableDryRun = EnableDryRunCheckBox.IsChecked == true;
         result.Dispatch.SendManualCaptureImage = SendManualCaptureImageCheckBox.IsChecked == true;

@@ -44,6 +44,7 @@ public sealed class LineDispatcher
             moveCursorToBottomOnComplete: true,
             completionCursorPoint: new PointF(0.92f, 0.985f),
             minimizeWindowOnComplete: true,
-            dryRun: _settings.Dispatch.EnableDryRun);
+            dryRun: _settings.Dispatch.EnableDryRun,
+            safePaste: _settings.Dispatch.EnableSafeDesktopPaste);
     }
 }
