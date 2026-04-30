@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Automation;
 using CodePulse.Dispatchers;
 
 namespace CodePulse.Services;
@@ -43,7 +44,7 @@ public sealed class LineTargetWindowService
                 return true;
             }
 
-            var title = GetWindowTitle(handle);
+            var title = GetBestWindowTitle(handle);
             if (string.IsNullOrWhiteSpace(title))
             {
                 return true;
@@ -104,7 +105,7 @@ public sealed class LineTargetWindowService
             return false;
         }
 
-        var currentTitle = GetWindowTitle(selected.Value.Handle);
+        var currentTitle = GetBestWindowTitle(selected.Value.Handle);
         window = new WindowHandleInfo(selected.Value.Handle, currentTitle, currentProcessName);
         return true;
     }
@@ -140,6 +141,42 @@ public sealed class LineTargetWindowService
         return builder.ToString();
     }
 
+    private static string GetBestWindowTitle(IntPtr handle)
+    {
+        var automationTitle = GetAutomationWindowTitle(handle);
+        if (!string.IsNullOrWhiteSpace(automationTitle) && !LooksGarbled(automationTitle))
+        {
+            return automationTitle;
+        }
+
+        var win32Title = GetWindowTitle(handle);
+        return !string.IsNullOrWhiteSpace(win32Title) ? win32Title : automationTitle;
+    }
+
+    private static string GetAutomationWindowTitle(IntPtr handle)
+    {
+        try
+        {
+            var element = AutomationElement.FromHandle(handle);
+            return element?.Current.Name?.Trim() ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool LooksGarbled(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        var questionMarks = value.Count(static character => character == '?');
+        return questionMarks >= 3 && questionMarks >= value.Length / 3;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -151,10 +188,10 @@ public sealed class LineTargetWindowService
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll")]
