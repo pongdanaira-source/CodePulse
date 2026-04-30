@@ -191,7 +191,7 @@ public sealed class YouTubeCommentScannerService
     {
         var query = new Dictionary<string, string>
         {
-            ["part"] = "snippet",
+            ["part"] = "snippet,replies",
             ["videoId"] = videoId,
             ["maxResults"] = maxResults.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["order"] = "time",
@@ -345,6 +345,27 @@ public sealed class YouTubeCommentScannerService
                 topLevelSnippet.TryGetProperty("textDisplay", out var textElement) ? textElement.GetString() ?? string.Empty : string.Empty,
                 TryGetDateTimeOffset(topLevelSnippet, "publishedAt"),
                 TryGetDateTimeOffset(topLevelSnippet, "updatedAt")));
+
+            if (!item.TryGetProperty("replies", out var repliesElement) ||
+                !repliesElement.TryGetProperty("comments", out var repliesCommentsElement) ||
+                repliesCommentsElement.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var reply in repliesCommentsElement.EnumerateArray())
+            {
+                var replySnippet = reply.GetProperty("snippet");
+                comments.Add(new YouTubeCommentInfo(
+                    reply.TryGetProperty("id", out var replyIdElement) ? replyIdElement.GetString() ?? string.Empty : string.Empty,
+                    replySnippet.TryGetProperty("authorChannelId", out var replyAuthorChannelIdElement) &&
+                    replyAuthorChannelIdElement.TryGetProperty("value", out var replyAuthorChannelIdValue)
+                        ? replyAuthorChannelIdValue.GetString() ?? string.Empty
+                        : string.Empty,
+                    replySnippet.TryGetProperty("textDisplay", out var replyTextElement) ? replyTextElement.GetString() ?? string.Empty : string.Empty,
+                    TryGetDateTimeOffset(replySnippet, "publishedAt"),
+                    TryGetDateTimeOffset(replySnippet, "updatedAt")));
+            }
         }
 
         return comments;
