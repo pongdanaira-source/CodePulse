@@ -75,6 +75,20 @@ public sealed class LineTargetWindowService
         }
     }
 
+    public bool TryRestoreByTitle(string title, out WindowHandleInfo window)
+    {
+        window = GetLineWindows()
+            .FirstOrDefault(candidate => candidate.Title.Equals(title, StringComparison.Ordinal));
+
+        if (window.Handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        Select(window);
+        return true;
+    }
+
     public void Clear()
     {
         lock (_sync)

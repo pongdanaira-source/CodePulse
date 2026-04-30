@@ -37,6 +37,13 @@ public sealed class FacebookDispatcher
             dryRun: _settings.Dispatch.EnableDryRun);
     }
 
+    public bool IsConfiguredTargetAvailable()
+    {
+        var targetUrl = _settings.Dispatch.FacebookTargetUrl.Trim();
+        return string.IsNullOrWhiteSpace(targetUrl) ||
+               DesktopAutomationHelper.AnyWindow(window => MatchesTarget(window, targetUrl));
+    }
+
     private static bool MatchesTarget(WindowHandleInfo window, string targetUrl)
     {
         if (string.IsNullOrWhiteSpace(targetUrl))

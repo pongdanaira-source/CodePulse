@@ -273,6 +273,11 @@ internal static class DesktopAutomationHelper
         return false;
     }
 
+    public static bool AnyWindow(Func<WindowHandleInfo, bool> matchWindow)
+    {
+        return FindWindow(matchWindow) is not null;
+    }
+
     private static WindowHandleInfo? FindWindow(Func<WindowHandleInfo, bool> matchWindow)
     {
         WindowHandleInfo? result = null;

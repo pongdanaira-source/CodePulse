@@ -99,6 +99,7 @@ public partial class SettingsWindow : Window
         destination.Dispatch.SaveManualCaptureImageToTempInDryRun = source.Dispatch.SaveManualCaptureImageToTempInDryRun;
         destination.Dispatch.PasteDelayMs = source.Dispatch.PasteDelayMs;
         destination.Dispatch.LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword;
+        destination.Dispatch.LineTargetWindowTitle = source.Dispatch.LineTargetWindowTitle;
         destination.Dispatch.FacebookTargetTitleKeyword = source.Dispatch.FacebookTargetTitleKeyword;
         destination.Dispatch.FacebookTargetUrl = source.Dispatch.FacebookTargetUrl;
         destination.EnableOcrDebugLog = source.EnableOcrDebugLog;
@@ -144,6 +145,7 @@ public partial class SettingsWindow : Window
 
         if (dialog.ShowDialog() == true && dialog.SelectedWindow is WindowHandleInfo selectedWindow)
         {
+            _draft.Dispatch.LineTargetWindowTitle = selectedWindow.Title;
             _selectLineTargetWindow(selectedWindow);
             RefreshLineTargetText();
         }
@@ -151,6 +153,7 @@ public partial class SettingsWindow : Window
 
     private void ClearLineWindowButton_OnClick(object sender, RoutedEventArgs e)
     {
+        _draft.Dispatch.LineTargetWindowTitle = string.Empty;
         _clearLineTargetWindow();
         RefreshLineTargetText();
     }
@@ -293,6 +296,7 @@ public partial class SettingsWindow : Window
         result.Dispatch.SendManualCaptureImage = SendManualCaptureImageCheckBox.IsChecked == true;
         result.Dispatch.SaveManualCaptureImageToTempInDryRun = SaveManualCaptureImageToTempInDryRunCheckBox.IsChecked == true;
         result.Dispatch.PasteDelayMs = pasteDelayMs;
+        result.Dispatch.LineTargetWindowTitle = _draft.Dispatch.LineTargetWindowTitle;
         result.Dispatch.FacebookTargetUrl = FacebookTargetUrlTextBox.Text.Trim();
         result.EnableOcrDebugLog = EnableOcrDebugLogCheckBox.IsChecked == true;
         result.EnableOcrSpaceFallback = EnableOcrSpaceFallbackCheckBox.IsChecked == true;

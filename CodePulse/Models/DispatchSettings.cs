@@ -22,6 +22,8 @@ public sealed class DispatchSettings
 
     public string LineTargetTitleKeyword { get; set; } = "LINE";
 
+    public string LineTargetWindowTitle { get; set; } = string.Empty;
+
     public string FacebookTargetTitleKeyword { get; set; } = "Messenger";
 
     public string FacebookTargetUrl { get; set; } = string.Empty;

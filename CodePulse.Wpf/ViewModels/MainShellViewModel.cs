@@ -29,6 +29,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     private readonly YouTubeCommentScannerService _commentScannerService;
     private readonly DispatchService _dispatchService;
     private readonly LineTargetWindowService _lineTargetWindowService;
+    private readonly FacebookDispatcher _facebookDispatcher;
     private readonly ObservableCollection<ChannelProfile> _channels = new();
     private readonly ObservableCollection<AppLogEntry> _logEntries = new();
     private readonly Dictionary<Guid, CancellationTokenSource> _boostTokens = new();
@@ -56,13 +57,13 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var telegramDispatcher = new TelegramDispatcher(_settings, telegramBotClient);
         _lineTargetWindowService = new LineTargetWindowService();
         var lineDispatcher = new LineDispatcher(_settings, _lineTargetWindowService);
-        var facebookDispatcher = new FacebookDispatcher(_settings);
+        _facebookDispatcher = new FacebookDispatcher(_settings);
         _dispatchService = new DispatchService(
             _settings,
             soundAlertService,
             telegramDispatcher,
             lineDispatcher,
-            facebookDispatcher);
+            _facebookDispatcher);
         var channelWatcher = new ChannelWatcher(
             _settings,
             codeExtractorService,
@@ -115,6 +116,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _appLogService.Write("WPF shell initialized");
         _appLogService.Write($"Settings file: {_settingsStore.SettingsPath}");
         _appLogService.Write($"Loaded channels: {_settings.Channels.Count}");
+        RestoreSavedDesktopTargets();
         LogDryRunSessionLogPathIfEnabled();
     }
 
@@ -435,6 +437,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     public void SelectLineTargetWindow(WindowHandleInfo window)
     {
         _lineTargetWindowService.Select(window);
+        _settings.Dispatch.LineTargetWindowTitle = window.Title;
         _appLogService.Write($"[LINE] เลือกหน้าต่างเป้าหมาย: {window.Title}");
         OnPropertyChanged(nameof(LineTargetWindowText));
     }
@@ -442,8 +445,43 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     public void ClearLineTargetWindow()
     {
         _lineTargetWindowService.Clear();
+        _settings.Dispatch.LineTargetWindowTitle = string.Empty;
         _appLogService.Write("[LINE] ล้างหน้าต่างเป้าหมายแล้ว");
         OnPropertyChanged(nameof(LineTargetWindowText));
+    }
+
+    private void RestoreSavedDesktopTargets()
+    {
+        var settingsChanged = false;
+
+        var savedLineTitle = _settings.Dispatch.LineTargetWindowTitle.Trim();
+        if (!string.IsNullOrWhiteSpace(savedLineTitle))
+        {
+            if (_lineTargetWindowService.TryRestoreByTitle(savedLineTitle, out var restoredLineWindow))
+            {
+                _appLogService.Write($"[LINE] กู้คืนหน้าต่างเป้าหมาย: {restoredLineWindow.Title}");
+                OnPropertyChanged(nameof(LineTargetWindowText));
+            }
+            else
+            {
+                _settings.Dispatch.LineTargetWindowTitle = string.Empty;
+                settingsChanged = true;
+                _appLogService.Write($"[LINE] ไม่พบหน้าต่างที่เคยเลือกไว้ ล้างค่าแล้ว: {savedLineTitle}");
+            }
+        }
+
+        var savedFacebookUrl = _settings.Dispatch.FacebookTargetUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(savedFacebookUrl) && !_facebookDispatcher.IsConfiguredTargetAvailable())
+        {
+            _settings.Dispatch.FacebookTargetUrl = string.Empty;
+            settingsChanged = true;
+            _appLogService.Write($"[Facebook] ไม่พบ Messenger target URL ที่เปิดอยู่ ล้างค่าแล้ว: {savedFacebookUrl}");
+        }
+
+        if (settingsChanged)
+        {
+            _watchCoordinator.SaveSettings();
+        }
     }
 
     public void SaveSettings(AppSettings updatedSettings)
@@ -766,7 +804,9 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
                 EnterAfterPaste = source.Dispatch.EnterAfterPaste,
                 EnableDesktopTargetVerification = false,
                 LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword,
+                LineTargetWindowTitle = source.Dispatch.LineTargetWindowTitle,
                 FacebookTargetTitleKeyword = source.Dispatch.FacebookTargetTitleKeyword,
+                FacebookTargetUrl = source.Dispatch.FacebookTargetUrl,
                 EnableDryRun = source.Dispatch.EnableDryRun,
                 SendManualCaptureImage = source.Dispatch.SendManualCaptureImage,
                 SaveManualCaptureImageToTempInDryRun = source.Dispatch.SaveManualCaptureImageToTempInDryRun
@@ -795,7 +835,9 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.Dispatch.EnterAfterPaste = source.Dispatch.EnterAfterPaste;
         destination.Dispatch.EnableDesktopTargetVerification = false;
         destination.Dispatch.LineTargetTitleKeyword = source.Dispatch.LineTargetTitleKeyword;
+        destination.Dispatch.LineTargetWindowTitle = source.Dispatch.LineTargetWindowTitle;
         destination.Dispatch.FacebookTargetTitleKeyword = source.Dispatch.FacebookTargetTitleKeyword;
+        destination.Dispatch.FacebookTargetUrl = source.Dispatch.FacebookTargetUrl;
         destination.Dispatch.EnableDryRun = source.Dispatch.EnableDryRun;
         destination.Dispatch.SendManualCaptureImage = source.Dispatch.SendManualCaptureImage;
         destination.Dispatch.SaveManualCaptureImageToTempInDryRun = source.Dispatch.SaveManualCaptureImageToTempInDryRun;
