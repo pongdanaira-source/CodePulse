@@ -156,7 +156,38 @@
                                       Content="Save manual capture image to Temp in dry run" />
                         </WrapPanel>
 
-                        <Border Margin="0,8,0,0"
+                        <Border Margin="0,8,0,12"
+                                Background="#131F23"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="14"
+                                Padding="14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0"
+                                            VerticalAlignment="Center">
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="OCR mode" />
+                                    <TextBlock Margin="0,5,18,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12"
+                                               Text="When OCR detects a code, keep Telegram enabled but skip LINE and Facebook desktop automation."
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <CheckBox x:Name="BlockDesktopDispatchForOcrCheckBox"
+                                          Grid.Column="1"
+                                          MinWidth="230"
+                                          VerticalAlignment="Center"
+                                          Content="Block LINE/Facebook" />
+                            </Grid>
+                        </Border>
+
+                        <Border Margin="0,0,0,0"
                                 Background="#111A1D"
                                 BorderBrush="{StaticResource BorderBrush}"
                                 BorderThickness="1"
@@ -323,6 +354,77 @@
                                          Margin="0,8,0,0" />
                             </StackPanel>
                         </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,18,0,0"
+                        Style="{StaticResource CardBorderStyle}">
+                    <StackPanel>
+                        <TextBlock FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Text="API usage" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="12"
+                                   Text="Local counters and daily YouTube key health checks used by the quota guard." />
+
+                        <Grid Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Background="#111A1D"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="14"
+                                    Padding="14">
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="YouTube Data API" />
+                                    <TextBlock x:Name="YouTubeUsageTextBlock"
+                                               Margin="0,8,0,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock x:Name="YouTubeHealthTextBlock"
+                                               Margin="0,6,0,0"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Background="#111A1D"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="14"
+                                    Padding="14">
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="OCR.space" />
+                                    <TextBlock x:Name="OcrSpaceUsageTextBlock"
+                                               Margin="0,8,0,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <StackPanel Margin="0,14,0,0"
+                                    Orientation="Horizontal">
+                            <Button Width="154"
+                                    Margin="0,0,10,0"
+                                    Click="CheckYouTubeKeysButton_OnClick"
+                                    Content="Check YouTube keys" />
+                            <Button Width="132"
+                                    Click="ResetApiCountersButton_OnClick"
+                                    Content="Reset counters" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>

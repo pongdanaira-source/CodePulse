@@ -7,12 +7,14 @@ public sealed class YouTubeCommentScannerService
 {
     private const int InitialMaxResults = 100;
     private const int PollMaxResults = 20;
+    private const string HealthCheckVideoId = "dQw4w9WgXcQ";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan MinimumPollInterval = TimeSpan.FromSeconds(1);
 
     private readonly AppSettings _settings;
     private readonly AppLogService _appLogService;
     private readonly WatchCoordinator _watchCoordinator;
+    private readonly ApiUsageTracker _apiUsageTracker;
     private readonly HttpClient _httpClient = new();
     private readonly Dictionary<Guid, CommentScannerRuntime> _runningScanners = new();
     private readonly HashSet<string> _failedApiKeys = new(StringComparer.Ordinal);
@@ -21,11 +23,13 @@ public sealed class YouTubeCommentScannerService
     public YouTubeCommentScannerService(
         AppSettings settings,
         AppLogService appLogService,
-        WatchCoordinator watchCoordinator)
+        WatchCoordinator watchCoordinator,
+        ApiUsageTracker? apiUsageTracker = null)
     {
         _settings = settings;
         _appLogService = appLogService;
         _watchCoordinator = watchCoordinator;
+        _apiUsageTracker = apiUsageTracker ?? new ApiUsageTracker();
     }
 
     public bool IsRunning(Guid channelId)
@@ -34,6 +38,74 @@ public sealed class YouTubeCommentScannerService
         {
             return _runningScanners.ContainsKey(channelId);
         }
+    }
+
+    public async Task<YouTubeApiHealthCheckSummary> CheckApiKeysAsync(CancellationToken cancellationToken)
+    {
+        var apiKeys = GetAllConfiguredApiKeys();
+        if (apiKeys.Count == 0)
+        {
+            _appLogService.Write("[Comment Scanner] YouTube API health check skipped: no API keys configured");
+            return new YouTubeApiHealthCheckSummary(0, 0, 0, 0);
+        }
+
+        var usable = 0;
+        var quotaExceeded = 0;
+        var invalid = 0;
+        var otherErrors = 0;
+        _appLogService.Write($"[Comment Scanner] YouTube API daily health check started for {apiKeys.Count} key(s)");
+
+        for (var index = 0; index < apiKeys.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var apiKey = apiKeys[index];
+            if (!_apiUsageTracker.TryReserveYouTubeUnits(1, GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count), out var usage))
+            {
+                otherErrors++;
+                _appLogService.Write($"[Comment Scanner] Key {index + 1}: skipped by local quota guard ({usage.YouTubeDailyUnits}/{GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count)})");
+                continue;
+            }
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(BuildHealthCheckUrl(apiKey), cancellationToken);
+                var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    usable++;
+                    _appLogService.Write($"[Comment Scanner] Key {index + 1}: usable");
+                    continue;
+                }
+
+                if (IsQuotaFailure(content))
+                {
+                    quotaExceeded++;
+                    RegisterFailedApiKey(apiKey);
+                    _appLogService.Write($"[Comment Scanner] Key {index + 1}: quota exceeded");
+                    continue;
+                }
+
+                if (IsInvalidKeyFailure(content))
+                {
+                    invalid++;
+                    RegisterFailedApiKey(apiKey);
+                    _appLogService.Write($"[Comment Scanner] Key {index + 1}: invalid key");
+                    continue;
+                }
+
+                otherErrors++;
+                _appLogService.Write($"[Comment Scanner] Key {index + 1}: health check failed ({(int)response.StatusCode})");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                otherErrors++;
+                _appLogService.Write($"[Comment Scanner] Key {index + 1}: health check error: {Summarize(ex)}");
+            }
+        }
+
+        var effectiveGuard = GetEffectiveYouTubeDailyQuotaGuard(Math.Max(usable, 1));
+        _appLogService.Write($"[Comment Scanner] YouTube API health check summary: usable {usable}/{apiKeys.Count}, quota exceeded {quotaExceeded}, invalid {invalid}, errors {otherErrors}, estimated local guard {effectiveGuard} units/day");
+        return new YouTubeApiHealthCheckSummary(apiKeys.Count, usable, quotaExceeded, invalid + otherErrors);
     }
 
     public bool Start(ChannelProfile channel, string videoUrlOrId, TimeSpan pollInterval, Action refreshChannels)
@@ -248,9 +320,18 @@ public sealed class YouTubeCommentScannerService
             throw new InvalidOperationException("No usable YouTube API key configured");
         }
 
+        var effectiveDailyLimit = GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count);
         Exception? lastException = null;
         foreach (var apiKey in apiKeys)
         {
+            if (!_apiUsageTracker.TryReserveYouTubeUnits(1, effectiveDailyLimit, out var usage))
+            {
+                throw new InvalidOperationException(
+                    $"YouTube API quota guard reached: {usage.YouTubeDailyUnits}/{effectiveDailyLimit} units today");
+            }
+
+            _appLogService.Write(
+                $"[Comment Scanner] YouTube API usage today: {usage.YouTubeDailyUnits}/{effectiveDailyLimit} units");
             using var response = await _httpClient.GetAsync(buildUrl(apiKey), cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             if (response.IsSuccessStatusCode)
@@ -274,12 +355,7 @@ public sealed class YouTubeCommentScannerService
 
     private List<string> GetUsableApiKeys()
     {
-        var allKeys = new[] { _settings.YouTubeApiKey }
-            .Concat(_settings.YouTubeApiBackupKeys)
-            .Select(static key => key.Trim())
-            .Where(static key => !string.IsNullOrWhiteSpace(key))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        var allKeys = GetAllConfiguredApiKeys();
 
         lock (_sync)
         {
@@ -287,6 +363,21 @@ public sealed class YouTubeCommentScannerService
                 .Where(key => !_failedApiKeys.Contains(key))
                 .ToList();
         }
+    }
+
+    private List<string> GetAllConfiguredApiKeys()
+    {
+        return new[] { _settings.YouTubeApiKey }
+            .Concat(_settings.YouTubeApiBackupKeys)
+            .Select(static key => key.Trim())
+            .Where(static key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private int GetEffectiveYouTubeDailyQuotaGuard(int keyCount)
+    {
+        return Math.Max(1, _settings.YouTubeApiDailyQuotaGuardUnits) * Math.Max(1, keyCount);
     }
 
     private void RegisterFailedApiKey(string apiKey)
@@ -299,10 +390,19 @@ public sealed class YouTubeCommentScannerService
 
     private static bool IsKeyOrQuotaFailure(string responseBody)
     {
+        return IsQuotaFailure(responseBody) || IsInvalidKeyFailure(responseBody);
+    }
+
+    private static bool IsQuotaFailure(string responseBody)
+    {
         return responseBody.Contains("quotaExceeded", StringComparison.OrdinalIgnoreCase) ||
                responseBody.Contains("dailyLimitExceeded", StringComparison.OrdinalIgnoreCase) ||
-               responseBody.Contains("rateLimitExceeded", StringComparison.OrdinalIgnoreCase) ||
-               responseBody.Contains("keyInvalid", StringComparison.OrdinalIgnoreCase) ||
+               responseBody.Contains("rateLimitExceeded", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsInvalidKeyFailure(string responseBody)
+    {
+        return responseBody.Contains("keyInvalid", StringComparison.OrdinalIgnoreCase) ||
                responseBody.Contains("API key not valid", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -317,6 +417,14 @@ public sealed class YouTubeCommentScannerService
         }
 
         return "key/quota error";
+    }
+
+    private static string BuildHealthCheckUrl(string apiKey)
+    {
+        return "https://www.googleapis.com/youtube/v3/videos?" +
+               "part=id" +
+               $"&id={Uri.EscapeDataString(HealthCheckVideoId)}" +
+               $"&key={Uri.EscapeDataString(apiKey)}";
     }
 
     private static List<YouTubeCommentInfo> ParseComments(string json)
@@ -498,3 +606,9 @@ public sealed class YouTubeCommentScannerService
         DateTimeOffset? PublishedAt,
         DateTimeOffset? UpdatedAt);
 }
+
+public readonly record struct YouTubeApiHealthCheckSummary(
+    int TotalKeys,
+    int UsableKeys,
+    int QuotaExceededKeys,
+    int FailedKeys);

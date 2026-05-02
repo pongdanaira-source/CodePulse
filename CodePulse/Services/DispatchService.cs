@@ -141,6 +141,12 @@ public sealed class DispatchService
 
     private async Task<bool> DispatchDesktopAsync(CodeDetectedEvent detectedEvent, CancellationToken cancellationToken)
     {
+        if (detectedEvent.IsOcrSource && _settings.Dispatch.BlockDesktopDispatchForOcr)
+        {
+            LogEmitted?.Invoke("[OCR] ข้าม LINE/Facebook ตามการตั้งค่า OCR mode");
+            return false;
+        }
+
         if (!_desktopDispatchEvaluator())
         {
             return false;

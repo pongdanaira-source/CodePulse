@@ -22,12 +22,16 @@ public sealed class OcrService
 
     private readonly string _tessDataPath;
     private readonly AppSettings _settings;
+    private readonly ApiUsageTracker _apiUsageTracker;
 
-    public OcrService(AppSettings settings)
+    public OcrService(AppSettings settings, ApiUsageTracker? apiUsageTracker = null)
     {
         _settings = settings;
+        _apiUsageTracker = apiUsageTracker ?? new ApiUsageTracker();
         _tessDataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
     }
+
+    public ApiUsageSnapshot UsageSnapshot => _apiUsageTracker.Snapshot();
 
     public Task<OcrReadResult> ReadAsync(Bitmap sourceBitmap, CancellationToken cancellationToken)
     {
@@ -120,6 +124,15 @@ public sealed class OcrService
     public async Task<OcrReadResult> ReadWithOcrSpaceAsync(Bitmap sourceBitmap, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (!_apiUsageTracker.TryReserveOcrSpaceRequest(
+                _settings.OcrSpaceDailyRequestGuard,
+                _settings.OcrSpaceHourlyRequestGuard,
+                out var usage))
+        {
+            throw new InvalidOperationException(
+                $"OCR.space guard reached: {usage.OcrSpaceDailyRequests}/{_settings.OcrSpaceDailyRequestGuard} today, " +
+                $"{usage.OcrSpaceHourlyRequests}/{_settings.OcrSpaceHourlyRequestGuard} this hour");
+        }
 
         using var stream = new MemoryStream();
         sourceBitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);

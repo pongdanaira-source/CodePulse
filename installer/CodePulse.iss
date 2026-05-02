@@ -1,5 +1,5 @@
 #define MyAppName "CodePulse"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "CodePulse"
 #define MyAppExeName "CodePulse.Wpf.exe"
 #define RepoRoot ".."
@@ -19,8 +19,8 @@ OutputBaseFilename=CodePulse-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile={#RepoRoot}\CodePulse.Wpf\Assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes

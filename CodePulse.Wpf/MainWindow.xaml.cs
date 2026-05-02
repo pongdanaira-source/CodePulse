@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private QuickCaptureLauncherWindow? _quickCaptureLauncherWindow;
     private bool _quickCaptureLauncherRestoreMainWindowWhenClosed;
     private CommentScannerWindow? _commentScannerWindow;
+    private LogViewWindow? _logViewWindow;
     private ScanRegionPreviewWindow? _scanRegionPreviewWindow;
     private Guid? _scanRegionPreviewChannelId;
 
@@ -46,6 +47,13 @@ public partial class MainWindow : Window
     {
         ((INotifyCollectionChanged)_viewModel.LogEntries).CollectionChanged -= HandleLogEntriesChanged;
         _scanPreviewMonitorTimer.Tick -= ScanPreviewMonitorTimer_OnTick;
+        if (_logViewWindow is not null)
+        {
+            _logViewWindow.Closed -= LogViewWindow_OnClosed;
+            _logViewWindow.Close();
+            _logViewWindow = null;
+        }
+
         HideScanRegionPreview();
         _viewModel.Shutdown();
         base.OnClosed(e);
@@ -96,7 +104,10 @@ public partial class MainWindow : Window
             _viewModel.GetLineTargetWindows,
             _viewModel.SelectLineTargetWindow,
             _viewModel.ClearLineTargetWindow,
-            () => _viewModel.LineTargetWindowText)
+            () => _viewModel.LineTargetWindowText,
+            _viewModel.GetApiUsageSnapshot,
+            _viewModel.CheckYouTubeApiKeysNowAsync,
+            _viewModel.ResetApiUsageCounters)
         {
             Owner = this
         };
@@ -323,6 +334,20 @@ public partial class MainWindow : Window
         Activate();
     }
 
+    public void ShowLogViewWindow()
+    {
+        if (_logViewWindow is not null)
+        {
+            _logViewWindow.BringForward();
+            return;
+        }
+
+        _logViewWindow = new LogViewWindow(_viewModel);
+        _logViewWindow.Closed += LogViewWindow_OnClosed;
+        _logViewWindow.Show();
+        _logViewWindow.Activate();
+    }
+
     public void HideToTray()
     {
         WindowState = WindowState.Minimized;
@@ -421,6 +446,15 @@ public partial class MainWindow : Window
         {
             _commentScannerWindow.Closed -= CommentScannerWindow_OnClosed;
             _commentScannerWindow = null;
+        }
+    }
+
+    private void LogViewWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_logViewWindow is not null)
+        {
+            _logViewWindow.Closed -= LogViewWindow_OnClosed;
+            _logViewWindow = null;
         }
     }
 

@@ -17,6 +17,9 @@ public partial class SettingsWindow : Window
     private readonly Action<WindowHandleInfo> _selectLineTargetWindow;
     private readonly Action _clearLineTargetWindow;
     private readonly Func<string> _getLineTargetWindowText;
+    private readonly Func<ApiUsageSnapshot> _getApiUsageSnapshot;
+    private readonly Func<Task<YouTubeApiHealthCheckSummary>> _checkYouTubeApiKeysAsync;
+    private readonly Func<ApiUsageSnapshot> _resetApiUsageCounters;
     private readonly List<TextBox> _youTubeBackupKeyTextBoxes = new();
 
     public SettingsWindow(
@@ -25,7 +28,10 @@ public partial class SettingsWindow : Window
         Func<IReadOnlyList<WindowHandleInfo>> getLineTargetWindows,
         Action<WindowHandleInfo> selectLineTargetWindow,
         Action clearLineTargetWindow,
-        Func<string> getLineTargetWindowText)
+        Func<string> getLineTargetWindowText,
+        Func<ApiUsageSnapshot> getApiUsageSnapshot,
+        Func<Task<YouTubeApiHealthCheckSummary>> checkYouTubeApiKeysAsync,
+        Func<ApiUsageSnapshot> resetApiUsageCounters)
     {
         InitializeComponent();
         _draft = draft;
@@ -34,8 +40,12 @@ public partial class SettingsWindow : Window
         _selectLineTargetWindow = selectLineTargetWindow;
         _clearLineTargetWindow = clearLineTargetWindow;
         _getLineTargetWindowText = getLineTargetWindowText;
+        _getApiUsageSnapshot = getApiUsageSnapshot;
+        _checkYouTubeApiKeysAsync = checkYouTubeApiKeysAsync;
+        _resetApiUsageCounters = resetApiUsageCounters;
 
         BindFromSettings(_draft);
+        RefreshApiUsageText();
     }
 
     public AppSettings? Result { get; private set; }
@@ -47,6 +57,7 @@ public partial class SettingsWindow : Window
         EnableSoundCheckBox.IsChecked = settings.Dispatch.EnableSound;
         EnableLineCheckBox.IsChecked = settings.Dispatch.EnableLine;
         EnableFacebookCheckBox.IsChecked = settings.Dispatch.EnableFacebook;
+        BlockDesktopDispatchForOcrCheckBox.IsChecked = settings.Dispatch.BlockDesktopDispatchForOcr;
         SkipIfWindowNotFoundCheckBox.IsChecked = settings.Dispatch.SkipIfWindowNotFound;
         EnterAfterPasteCheckBox.IsChecked = settings.Dispatch.EnterAfterPaste;
         EnableSafeDesktopPasteCheckBox.IsChecked = settings.Dispatch.EnableSafeDesktopPaste;
@@ -92,6 +103,7 @@ public partial class SettingsWindow : Window
         destination.Dispatch.EnableSound = source.Dispatch.EnableSound;
         destination.Dispatch.EnableLine = source.Dispatch.EnableLine;
         destination.Dispatch.EnableFacebook = source.Dispatch.EnableFacebook;
+        destination.Dispatch.BlockDesktopDispatchForOcr = source.Dispatch.BlockDesktopDispatchForOcr;
         destination.Dispatch.SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound;
         destination.Dispatch.EnterAfterPaste = source.Dispatch.EnterAfterPaste;
         destination.Dispatch.EnableSafeDesktopPaste = source.Dispatch.EnableSafeDesktopPaste;
@@ -110,6 +122,10 @@ public partial class SettingsWindow : Window
         destination.OcrSpaceLanguage = source.OcrSpaceLanguage;
         destination.YouTubeApiKey = source.YouTubeApiKey;
         destination.YouTubeApiBackupKeys = source.YouTubeApiBackupKeys.ToList();
+        destination.YouTubeApiDailyQuotaGuardUnits = source.YouTubeApiDailyQuotaGuardUnits;
+        destination.YouTubeApiHealthCheckLastRunDate = source.YouTubeApiHealthCheckLastRunDate;
+        destination.OcrSpaceDailyRequestGuard = source.OcrSpaceDailyRequestGuard;
+        destination.OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard;
         destination.BoostTimeoutSeconds = source.BoostTimeoutSeconds;
         destination.CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls);
         destination.Channels = source.Channels.Select(CloneChannel).ToList();
@@ -207,9 +223,22 @@ public partial class SettingsWindow : Window
         try
         {
             var json = File.ReadAllText(dialog.FileName);
-            if (!SettingsStore.TryDeserialize(json, out var imported))
+            string? importPassword = null;
+            if (SettingsStore.ContainsPasswordProtectedSecrets(json))
             {
-                ShowStatus("Import failed: invalid settings file.", MessageBoxImage.Warning);
+                importPassword = PromptForPassword(
+                    "Import settings",
+                    "Enter the export password to unlock saved tokens and API keys.",
+                    confirmPassword: false);
+                if (importPassword is null)
+                {
+                    return;
+                }
+            }
+
+            if (!SettingsStore.TryDeserialize(json, out var imported, importPassword))
+            {
+                ShowStatus("Import failed: invalid settings file or password.", MessageBoxImage.Warning);
                 return;
             }
 
@@ -248,9 +277,18 @@ public partial class SettingsWindow : Window
 
         try
         {
-            var json = SettingsStore.Serialize(result);
+            var exportPassword = PromptForPassword(
+                "Export settings",
+                "Create a password for the exported tokens and API keys. You will need this password to import them on another computer; it cannot be recovered if forgotten.",
+                confirmPassword: true);
+            if (exportPassword is null)
+            {
+                return;
+            }
+
+            var json = SettingsStore.SerializeForExport(result, exportPassword);
             File.WriteAllText(dialog.FileName, json);
-            ShowStatus($"Exported settings to {dialog.FileName}", MessageBoxImage.Information);
+            ShowStatus($"Exported settings with encrypted API keys to {dialog.FileName}", MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -267,6 +305,71 @@ public partial class SettingsWindow : Window
     private void RefreshLineTargetText()
     {
         LineTargetWindowTextBlock.Text = _getLineTargetWindowText();
+    }
+
+    private string? PromptForPassword(string title, string message, bool confirmPassword)
+    {
+        var passwordBox = new PasswordBox { MinWidth = 280, Margin = new Thickness(0, 8, 0, 0) };
+        var confirmBox = new PasswordBox { MinWidth = 280, Margin = new Thickness(0, 8, 0, 0) };
+        var statusText = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.IndianRed,
+            Margin = new Thickness(0, 8, 0, 0),
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(passwordBox);
+        if (confirmPassword)
+        {
+            panel.Children.Add(new TextBlock { Text = "Confirm password", Margin = new Thickness(0, 14, 0, 0) });
+            panel.Children.Add(confirmBox);
+        }
+
+        panel.Children.Add(statusText);
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 18, 0, 0)
+        };
+        var cancelButton = new Button { Content = "Cancel", Width = 90, Margin = new Thickness(0, 0, 10, 0), IsCancel = true };
+        var okButton = new Button { Content = "OK", Width = 90, IsDefault = true };
+        buttons.Children.Add(cancelButton);
+        buttons.Children.Add(okButton);
+        panel.Children.Add(buttons);
+
+        var window = new Window
+        {
+            Title = title,
+            Content = panel,
+            Owner = this,
+            Width = 380,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        okButton.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(passwordBox.Password))
+            {
+                statusText.Text = "Password is required.";
+                return;
+            }
+
+            if (confirmPassword && passwordBox.Password != confirmBox.Password)
+            {
+                statusText.Text = "Passwords do not match.";
+                return;
+            }
+
+            window.DialogResult = true;
+        };
+
+        return window.ShowDialog() == true ? passwordBox.Password : null;
     }
 
     private bool TryBuildResult(out AppSettings result, out string validationMessage)
@@ -291,6 +394,7 @@ public partial class SettingsWindow : Window
         result.Dispatch.EnableSound = EnableSoundCheckBox.IsChecked == true;
         result.Dispatch.EnableLine = EnableLineCheckBox.IsChecked == true;
         result.Dispatch.EnableFacebook = EnableFacebookCheckBox.IsChecked == true;
+        result.Dispatch.BlockDesktopDispatchForOcr = BlockDesktopDispatchForOcrCheckBox.IsChecked == true;
         result.Dispatch.SkipIfWindowNotFound = SkipIfWindowNotFoundCheckBox.IsChecked == true;
         result.Dispatch.EnterAfterPaste = EnterAfterPasteCheckBox.IsChecked == true;
         result.Dispatch.EnableSafeDesktopPaste = EnableSafeDesktopPasteCheckBox.IsChecked == true;
@@ -316,5 +420,54 @@ public partial class SettingsWindow : Window
         result.BoostTimeoutSeconds = boostTimeoutSeconds;
 
         return true;
+    }
+
+    private async void CheckYouTubeKeysButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryBuildResult(out _, out var validationMessage))
+        {
+            ShowStatus(validationMessage, MessageBoxImage.Warning);
+            return;
+        }
+
+        YouTubeHealthTextBlock.Text = "Checking keys...";
+        try
+        {
+            var summary = await _checkYouTubeApiKeysAsync();
+            YouTubeHealthTextBlock.Text =
+                $"Health check: usable {summary.UsableKeys}/{summary.TotalKeys}, quota exceeded {summary.QuotaExceededKeys}, failed {summary.FailedKeys}.";
+            RefreshApiUsageText();
+        }
+        catch (Exception ex)
+        {
+            YouTubeHealthTextBlock.Text = $"Health check failed: {ex.Message}";
+        }
+    }
+
+    private void ResetApiCountersButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _resetApiUsageCounters();
+        RefreshApiUsageText();
+    }
+
+    private void RefreshApiUsageText()
+    {
+        var snapshot = _getApiUsageSnapshot();
+        var configuredYouTubeKeyCount = CountConfiguredYouTubeKeys();
+        var effectiveYouTubeGuard = Math.Max(1, _draft.YouTubeApiDailyQuotaGuardUnits) * Math.Max(1, configuredYouTubeKeyCount);
+        YouTubeUsageTextBlock.Text =
+            $"Today: {snapshot.YouTubeDailyUnits}/{effectiveYouTubeGuard} units. Configured keys: {configuredYouTubeKeyCount}.";
+        YouTubeHealthTextBlock.Text = string.IsNullOrWhiteSpace(_draft.YouTubeApiHealthCheckLastRunDate)
+            ? "Health check has not run yet."
+            : $"Last daily health check: {_draft.YouTubeApiHealthCheckLastRunDate}.";
+        OcrSpaceUsageTextBlock.Text =
+            $"Today: {snapshot.OcrSpaceDailyRequests}/{_draft.OcrSpaceDailyRequestGuard} requests. This hour: {snapshot.OcrSpaceHourlyRequests}/{_draft.OcrSpaceHourlyRequestGuard}.";
+    }
+
+    private int CountConfiguredYouTubeKeys()
+    {
+        return new[] { YouTubeApiKeyTextBox.Text.Trim() }
+            .Concat(_youTubeBackupKeyTextBoxes.Select(static textBox => textBox.Text.Trim()))
+            .Count(static value => !string.IsNullOrWhiteSpace(value));
     }
 }

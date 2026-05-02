@@ -13,4 +13,6 @@ public sealed class CodeDetectedEvent
     public DateTimeOffset DetectedAt { get; set; } = DateTimeOffset.Now;
 
     public string? CapturedImagePath { get; set; }
+
+    public bool IsOcrSource { get; set; }
 }

@@ -187,8 +187,7 @@ public static class ChatLinkService
             return false;
         }
 
-        var host = uri.Host.ToLowerInvariant();
-        if (!host.Contains("youtube.com"))
+        if (!IsAllowedYouTubeHost(uri.Host))
         {
             return false;
         }
@@ -217,8 +216,7 @@ public static class ChatLinkService
             return false;
         }
 
-        var host = uri.Host.ToLowerInvariant();
-        if (!host.Contains("youtube.com"))
+        if (!IsAllowedYouTubeHost(uri.Host))
         {
             return false;
         }
@@ -254,6 +252,13 @@ public static class ChatLinkService
     private static string BuildLiveChatLink(string videoId)
     {
         return $"https://www.youtube.com/live_chat?is_popout=1&v={Uri.EscapeDataString(videoId)}";
+    }
+
+    private static bool IsAllowedYouTubeHost(string host)
+    {
+        return string.Equals(host, "youtube.com", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(host, "www.youtube.com", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(host, "m.youtube.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryExtractWatchVideoId(Uri? uri, out string videoId)

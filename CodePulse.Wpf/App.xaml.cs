@@ -104,6 +104,14 @@ public partial class App : Application
         }
     }
 
+    private void LogViewTrayMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (Current.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ShowLogViewWindow();
+        }
+    }
+
     private void ShowMainWindowTrayMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         if (Current.MainWindow is MainWindow mainWindow)

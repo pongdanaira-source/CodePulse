@@ -27,6 +27,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     private readonly CaptureWorkflowService _captureWorkflowService;
     private readonly OcrScanWorkflowService _ocrScanWorkflowService;
     private readonly YouTubeCommentScannerService _commentScannerService;
+    private readonly ApiUsageTracker _apiUsageTracker;
     private readonly DispatchService _dispatchService;
     private readonly LineTargetWindowService _lineTargetWindowService;
     private readonly FacebookDispatcher _facebookDispatcher;
@@ -50,9 +51,11 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var codeExtractorService = new CodeExtractorService();
         var dailyCodeHistoryService = new DailyCodeHistoryService(_settingsStore.AppFolderPath);
         var duplicateGuard = new ChannelDuplicateGuard();
+        var apiUsageTracker = new ApiUsageTracker();
+        _apiUsageTracker = apiUsageTracker;
         var screenCaptureService = new ScreenCaptureService();
         var manualCaptureArtifactService = new ManualCaptureArtifactService();
-        var ocrService = new OcrService(_settings);
+        var ocrService = new OcrService(_settings, apiUsageTracker);
         var soundAlertService = new SoundAlertService();
         var telegramDispatcher = new TelegramDispatcher(_settings, telegramBotClient);
         _lineTargetWindowService = new LineTargetWindowService();
@@ -98,7 +101,8 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _commentScannerService = new YouTubeCommentScannerService(
             _settings,
             _appLogService,
-            _watchCoordinator);
+            _watchCoordinator,
+            apiUsageTracker);
 
         _dispatchService.SetBoostEvaluator(HasActiveBoost, IsBoostedChannel);
         _watchCoordinator.LogEmitted += _appLogService.Write;
@@ -114,10 +118,16 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         LoadLogSnapshot();
 
         _appLogService.Write("WPF shell initialized");
+        if (!string.IsNullOrWhiteSpace(_settingsStore.LastLoadFailureMessage))
+        {
+            _appLogService.Write(_settingsStore.LastLoadFailureMessage);
+        }
+
         _appLogService.Write($"Settings file: {_settingsStore.SettingsPath}");
         _appLogService.Write($"Loaded channels: {_settings.Channels.Count}");
         RestoreSavedDesktopTargets();
         LogDryRunSessionLogPathIfEnabled();
+        RunDailyYouTubeApiHealthCheckIfNeeded();
     }
 
     private static string? ResolveRuntimeDataRootPath()
@@ -365,6 +375,26 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     public bool IsCommentScannerRunning(ChannelProfile channel)
     {
         return _commentScannerService.IsRunning(channel.Id);
+    }
+
+    public ApiUsageSnapshot GetApiUsageSnapshot()
+    {
+        return _apiUsageTracker.Snapshot();
+    }
+
+    public async Task<YouTubeApiHealthCheckSummary> CheckYouTubeApiKeysNowAsync()
+    {
+        var summary = await _commentScannerService.CheckApiKeysAsync(CancellationToken.None);
+        _settings.YouTubeApiHealthCheckLastRunDate = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        _settingsStore.Save(_settings);
+        return summary;
+    }
+
+    public ApiUsageSnapshot ResetApiUsageCounters()
+    {
+        var snapshot = _apiUsageTracker.Reset();
+        _appLogService.Write("API usage counters reset");
+        return snapshot;
     }
 
     public bool StartCommentScanner(ChannelProfile channel, string videoUrlOrId, TimeSpan pollInterval)
@@ -758,6 +788,33 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _appLogService.Write($"Dry run session log: {_appLogService.CurrentSessionLogPath}");
     }
 
+    private void RunDailyYouTubeApiHealthCheckIfNeeded()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.YouTubeApiKey) &&
+            !_settings.YouTubeApiBackupKeys.Any(static key => !string.IsNullOrWhiteSpace(key)))
+        {
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        if (string.Equals(_settings.YouTubeApiHealthCheckLastRunDate, today, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await CheckYouTubeApiKeysNowAsync();
+            }
+            catch (Exception ex)
+            {
+                _appLogService.Write($"[Comment Scanner] YouTube API daily health check failed: {ex.Message}");
+            }
+        });
+    }
+
     private static string NormalizeSortValue(string? value)
     {
         return value?.Trim() ?? string.Empty;
@@ -798,6 +855,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
                 TelegramChatId = source.Dispatch.TelegramChatId,
                 EnableLine = source.Dispatch.EnableLine,
                 EnableFacebook = source.Dispatch.EnableFacebook,
+                BlockDesktopDispatchForOcr = source.Dispatch.BlockDesktopDispatchForOcr,
                 EnableSound = source.Dispatch.EnableSound,
                 SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound,
                 PasteDelayMs = source.Dispatch.PasteDelayMs,
@@ -818,6 +876,10 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             OcrSpaceLanguage = source.OcrSpaceLanguage,
             YouTubeApiKey = source.YouTubeApiKey,
             YouTubeApiBackupKeys = source.YouTubeApiBackupKeys.ToList(),
+            YouTubeApiDailyQuotaGuardUnits = source.YouTubeApiDailyQuotaGuardUnits,
+            YouTubeApiHealthCheckLastRunDate = source.YouTubeApiHealthCheckLastRunDate,
+            OcrSpaceDailyRequestGuard = source.OcrSpaceDailyRequestGuard,
+            OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard,
             BoostTimeoutSeconds = source.BoostTimeoutSeconds,
             CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls),
             Channels = source.Channels.Select(CloneChannel).ToList()
@@ -830,6 +892,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.Dispatch.TelegramChatId = source.Dispatch.TelegramChatId;
         destination.Dispatch.EnableLine = source.Dispatch.EnableLine;
         destination.Dispatch.EnableFacebook = source.Dispatch.EnableFacebook;
+        destination.Dispatch.BlockDesktopDispatchForOcr = source.Dispatch.BlockDesktopDispatchForOcr;
         destination.Dispatch.EnableSound = source.Dispatch.EnableSound;
         destination.Dispatch.SkipIfWindowNotFound = source.Dispatch.SkipIfWindowNotFound;
         destination.Dispatch.PasteDelayMs = source.Dispatch.PasteDelayMs;
@@ -849,6 +912,10 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.OcrSpaceLanguage = source.OcrSpaceLanguage;
         destination.YouTubeApiKey = source.YouTubeApiKey;
         destination.YouTubeApiBackupKeys = source.YouTubeApiBackupKeys.ToList();
+        destination.YouTubeApiDailyQuotaGuardUnits = source.YouTubeApiDailyQuotaGuardUnits;
+        destination.YouTubeApiHealthCheckLastRunDate = source.YouTubeApiHealthCheckLastRunDate;
+        destination.OcrSpaceDailyRequestGuard = source.OcrSpaceDailyRequestGuard;
+        destination.OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard;
         destination.BoostTimeoutSeconds = source.BoostTimeoutSeconds;
         destination.CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls);
     }

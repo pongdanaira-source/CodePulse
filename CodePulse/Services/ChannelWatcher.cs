@@ -552,7 +552,8 @@ public sealed class ChannelWatcher
             Candidate = candidate,
             SourceMessage = sourceMessage,
             DetectedAt = detectedAt,
-            CapturedImagePath = capturedImagePath
+            CapturedImagePath = capturedImagePath,
+            IsOcrSource = string.Equals(candidate.Reason, "ocr-selected", StringComparison.Ordinal)
         };
 
         CodeDetected?.Invoke(detectedEvent);

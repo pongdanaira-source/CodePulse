@@ -114,6 +114,8 @@
                                   Click="QuickCaptureTrayMenuItem_OnClick" />
                         <MenuItem Header="Comments"
                                   Click="CommentsTrayMenuItem_OnClick" />
+                        <MenuItem Header="Log view"
+                                  Click="LogViewTrayMenuItem_OnClick" />
                         <MenuItem Header="Show Main Window"
                                   Click="ShowMainWindowTrayMenuItem_OnClick" />
                         <Separator />

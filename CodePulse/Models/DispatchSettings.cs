@@ -10,6 +10,8 @@ public sealed class DispatchSettings
 
     public bool EnableFacebook { get; set; }
 
+    public bool BlockDesktopDispatchForOcr { get; set; } = true;
+
     public bool EnableSound { get; set; } = true;
 
     public bool SkipIfWindowNotFound { get; set; } = true;

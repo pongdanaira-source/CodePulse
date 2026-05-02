@@ -16,6 +16,14 @@ public sealed class AppSettings
 
     public List<string> YouTubeApiBackupKeys { get; set; } = new();
 
+    public int YouTubeApiDailyQuotaGuardUnits { get; set; } = 9000;
+
+    public string YouTubeApiHealthCheckLastRunDate { get; set; } = string.Empty;
+
+    public int OcrSpaceDailyRequestGuard { get; set; } = 100;
+
+    public int OcrSpaceHourlyRequestGuard { get; set; } = 20;
+
     public int BoostTimeoutSeconds { get; set; } = 60;
 
     public Dictionary<Guid, string> CommentScannerLastVideoUrls { get; set; } = new();

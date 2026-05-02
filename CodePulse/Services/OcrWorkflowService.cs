@@ -20,6 +20,7 @@ public sealed class OcrWorkflowService
     private readonly TelegramBotClient _telegramBotClient;
     private readonly Dictionary<Guid, OcrNoticeState> _ocrNoticeStates = new();
     private readonly HashSet<string> _sentSuspiciousAlertKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _sentOcrProblemAlertKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _suspiciousAlertedChannelsThisSession = new();
     private readonly object _sync = new();
 
@@ -76,6 +77,11 @@ public sealed class OcrWorkflowService
         try
         {
             var ocrSpaceResult = await _ocrService.ReadWithOcrSpaceAsync(bitmap, cancellationToken);
+            var usage = _ocrService.UsageSnapshot;
+            Log(
+                emitLog,
+                channel,
+                $"OCR.space usage: {usage.OcrSpaceDailyRequests}/{_settings.OcrSpaceDailyRequestGuard} today, {usage.OcrSpaceHourlyRequests}/{_settings.OcrSpaceHourlyRequestGuard} this hour");
             if (ocrSpaceResult.Passes.Count == 0)
             {
                 Log(emitLog, channel, "OCR.space ไม่พบข้อความ");
@@ -278,52 +284,32 @@ public sealed class OcrWorkflowService
 
         if (dispatchableGroups.Count > 1)
         {
-            if (!suppressNoChangeLogs)
+            var multipleCodes = dispatchableGroups
+                .Select(static group => group.Code)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var multipleCodeSignature = suppressNoChangeLogs
+                ? "multiple-results"
+                : string.Join(",", multipleCodes);
+
+            if (ShouldLogOcrNotice(channel.Id, OwnerTextProcessingStatus.Ambiguous, multipleCodeSignature))
             {
-                Log(emitLog, channel, $"OCR พบหลายโค้ดในเฟรม กำลังส่ง {dispatchableGroups.Count} โค้ด");
+                Log(emitLog, channel, "OCR พบหลายโค้ดในเฟรม ไม่ส่งอัตโนมัติ");
+                Log(emitLog, channel, $"OCR candidates: {string.Join(", ", multipleCodes)}");
             }
 
-            var dispatchedCodes = new List<string>();
-            OwnerTextProcessingResult? lastNonSuccess = null;
-            foreach (var group in dispatchableGroups)
+            await TrySendOcrProblemAlertAsync(
+                channel,
+                "OCR พบหลายโค้ดในเฟรม",
+                multipleCodes,
+                selectedPass.Pass.Text,
+                cancellationToken,
+                emitLog);
+
+            return new OwnerTextProcessingResult
             {
-                var groupResult = await _watchCoordinator.ProcessDetectedCodeAsync(
-                    channel,
-                    group.Code,
-                    group.SelectedPass.Pass.Text,
-                    capturedImagePath,
-                    cancellationToken);
-
-                if (groupResult.Status == OwnerTextProcessingStatus.Dispatched)
-                {
-                    dispatchedCodes.Add(group.Code);
-                    continue;
-                }
-
-                lastNonSuccess = groupResult;
-            }
-
-            if (dispatchedCodes.Count > 0)
-            {
-                ResetOcrNotice(channel.Id);
-                return new OwnerTextProcessingResult
-                {
-                    Status = OwnerTextProcessingStatus.Dispatched,
-                    Code = dispatchedCodes[0],
-                    Message = dispatchedCodes.Count > 1
-                        ? string.Join(", ", dispatchedCodes)
-                        : dispatchedCodes[0]
-                };
-            }
-
-            if (suspiciousBlob is not null)
-            {
-                await TrySendSuspiciousOcrAlertAsync(channel, suspiciousBlob.Value.Text, suspiciousBlob.Value.Reason, cancellationToken, emitLog);
-            }
-
-            return lastNonSuccess ?? new OwnerTextProcessingResult
-            {
-                Status = OwnerTextProcessingStatus.NoCode
+                Status = OwnerTextProcessingStatus.Ambiguous,
+                Message = string.Join(", ", multipleCodes)
             };
         }
 
@@ -337,10 +323,13 @@ public sealed class OcrWorkflowService
 
         if (isAmbiguous)
         {
-            if (suspiciousBlob is not null)
-            {
-                await TrySendSuspiciousOcrAlertAsync(channel, suspiciousBlob.Value.Text, suspiciousBlob.Value.Reason, cancellationToken, emitLog);
-            }
+            await TrySendOcrProblemAlertAsync(
+                channel,
+                "OCR ได้หลายผลคะแนนใกล้กัน",
+                groupedCandidates.Take(3).Select(static group => group.Code).ToList(),
+                selectedPass.Pass.Text,
+                cancellationToken,
+                emitLog);
 
             return new OwnerTextProcessingResult
             {
@@ -552,6 +541,49 @@ public sealed class OcrWorkflowService
         }
     }
 
+    private async Task TrySendOcrProblemAlertAsync(
+        ChannelProfile channel,
+        string reason,
+        IReadOnlyList<string> candidates,
+        string sourceText,
+        CancellationToken cancellationToken,
+        Action<string> emitLog)
+    {
+        var signature = $"ocr-problem:{reason}:{string.Join(",", candidates)}";
+        if (!TryRegisterOcrProblemAlert(channel.Id, signature, DateTimeOffset.Now))
+        {
+            return;
+        }
+
+        Log(emitLog, channel, "OCR พบ Code มีปัญหา ส่งเตือน Telegram only");
+
+        if (string.IsNullOrWhiteSpace(_settings.Dispatch.TelegramBotToken) ||
+            string.IsNullOrWhiteSpace(_settings.Dispatch.TelegramChatId))
+        {
+            Log(emitLog, channel, "ข้ามการเตือน Telegram เพราะยังไม่ได้ตั้งค่า Telegram");
+            return;
+        }
+
+        try
+        {
+            _telegramBotClient.BotToken = _settings.Dispatch.TelegramBotToken;
+            _telegramBotClient.ChatId = _settings.Dispatch.TelegramChatId;
+            var candidatesLine = candidates.Count > 0
+                ? $"{Environment.NewLine}Candidates: {string.Join(", ", candidates)}"
+                : string.Empty;
+            await _telegramBotClient.SendMessageAsync(
+                $"Code มีปัญหา [{channel.Name}]{Environment.NewLine}Reason: {reason}{candidatesLine}{Environment.NewLine}Text: {TrimForDebugLog(sourceText)}",
+                sourceText,
+                channel.Name,
+                cancellationToken);
+            Log(emitLog, channel, "ส่งเตือน Telegram สำเร็จ");
+        }
+        catch (Exception ex)
+        {
+            Log(emitLog, channel, $"ส่งเตือน Telegram ล้มเหลว: {SummarizeException(ex)}");
+        }
+    }
+
     private bool ShouldLogOcrNotice(Guid channelId, OwnerTextProcessingStatus status, string? signature)
     {
         lock (_sync)
@@ -586,6 +618,15 @@ public sealed class OcrWorkflowService
         lock (_sync)
         {
             return _sentSuspiciousAlertKeys.Add(key);
+        }
+    }
+
+    private bool TryRegisterOcrProblemAlert(Guid channelId, string signature, DateTimeOffset now)
+    {
+        var key = $"{channelId:N}|{GetBusinessDate(now):yyyy-MM-dd}|{signature}";
+        lock (_sync)
+        {
+            return _sentOcrProblemAlertKeys.Add(key);
         }
     }
 

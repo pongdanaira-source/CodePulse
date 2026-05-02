@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 Output:
 
 ```text
-artifacts\installer\CodePulse-Setup-1.0.0.exe
+artifacts\installer\CodePulse-Setup-1.0.1.exe
 ```
 
 The installer creates Start Menu shortcuts and can optionally create a Desktop shortcut.

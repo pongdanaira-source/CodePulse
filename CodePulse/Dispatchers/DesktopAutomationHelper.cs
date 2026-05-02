@@ -477,9 +477,10 @@ internal static class DesktopAutomationHelper
     {
         try
         {
-            if (Clipboard.ContainsText())
+            var data = Clipboard.GetDataObject();
+            if (data is not null)
             {
-                return new ClipboardBackup(true, Clipboard.GetText());
+                return new ClipboardBackup(true, data);
             }
         }
         catch
@@ -487,20 +488,19 @@ internal static class DesktopAutomationHelper
             // Ignore clipboard access errors.
         }
 
-        return new ClipboardBackup(false, string.Empty);
+        return new ClipboardBackup(false, null);
     }
 
     private static void RestoreClipboard(ClipboardBackup backup)
     {
         try
         {
-            if (!backup.HasText)
+            if (!backup.HasData || backup.Data is null)
             {
                 return;
             }
 
-            Clipboard.Clear();
-            Clipboard.SetText(backup.Text);
+            Clipboard.SetDataObject(backup.Data, copy: true);
         }
         catch
         {
@@ -599,7 +599,7 @@ internal static class DesktopAutomationHelper
         public int Y;
     }
 
-    private readonly record struct ClipboardBackup(bool HasText, string Text);
+    private readonly record struct ClipboardBackup(bool HasData, IDataObject? Data);
 }
 
 public readonly record struct WindowHandleInfo(IntPtr Handle, string Title, string ProcessName);
