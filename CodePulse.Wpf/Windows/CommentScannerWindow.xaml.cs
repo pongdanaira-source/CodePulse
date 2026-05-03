@@ -107,7 +107,7 @@ public partial class CommentScannerWindow : Window
         StartButton.IsEnabled = hasChannel && hasVideo && !isRunning;
         StopButton.IsEnabled = hasChannel && isRunning;
         PollIntervalComboBox.IsEnabled = !isRunning;
-        ChannelComboBox.IsEnabled = !isRunning;
+        ChannelComboBox.IsEnabled = hasChannel;
         VideoUrlTextBox.IsEnabled = !isRunning;
 
         if (!hasChannel)
