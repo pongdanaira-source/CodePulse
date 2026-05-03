@@ -6,6 +6,8 @@ public sealed class OwnerTextProcessingResult
 
     public string? Code { get; init; }
 
+    public IReadOnlyList<string> Codes { get; init; } = [];
+
     public string? Message { get; init; }
 }
 

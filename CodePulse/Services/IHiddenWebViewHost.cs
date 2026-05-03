@@ -13,6 +13,8 @@ public interface IHiddenWebViewHost
 
     Task<bool> ReloadAndWaitUntilReadyAsync(CancellationToken cancellationToken);
 
+    Task SetLowLatencyModeAsync(bool enabled, CancellationToken cancellationToken);
+
     string? DocumentTitle { get; }
 
     void DisposeHost();

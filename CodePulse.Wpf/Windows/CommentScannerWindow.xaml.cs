@@ -38,14 +38,14 @@ public partial class CommentScannerWindow : Window
 
         PollIntervalComboBox.ItemsSource = new[]
         {
-            new PollIntervalOption("1 sec", 1),
+            new PollIntervalOption("Burst 1 sec / 5 min", 1),
             new PollIntervalOption("5 sec", 5),
             new PollIntervalOption("10 sec", 10),
             new PollIntervalOption("20 sec", 20),
             new PollIntervalOption("30 sec", 30),
             new PollIntervalOption("60 sec", 60)
         };
-        PollIntervalComboBox.SelectedValue = 20;
+        PollIntervalComboBox.SelectedValue = 1;
         LoadLastVideoUrlForSelectedChannel();
 
         UpdateButtons();
@@ -120,7 +120,9 @@ public partial class CommentScannerWindow : Window
         if (isRunning)
         {
             SelectedStatusTextBlock.Text = "Running";
-            SelectedStatusHintTextBlock.Text = $"Polling every {GetSelectedPollInterval().TotalSeconds:0} sec for owner comments on {SelectedChannel!.Name}.";
+            SelectedStatusHintTextBlock.Text = IsBurstSelected()
+                ? $"Burst polling every 1 sec for owner comments on {SelectedChannel!.Name}. Stops after 5 min or 400 requests."
+                : $"Polling every {GetSelectedPollInterval().TotalSeconds:0} sec for owner comments on {SelectedChannel!.Name}.";
             return;
         }
 
@@ -132,7 +134,9 @@ public partial class CommentScannerWindow : Window
         }
 
         SelectedStatusTextBlock.Text = "Ready";
-        SelectedStatusHintTextBlock.Text = $"Scanner is ready to start for {SelectedChannel!.Name}.";
+        SelectedStatusHintTextBlock.Text = IsBurstSelected()
+            ? $"Burst scanner is ready for {SelectedChannel!.Name}: 1 sec, 5 min, 400 request guard."
+            : $"Scanner is ready to start for {SelectedChannel!.Name}.";
     }
 
     private TimeSpan GetSelectedPollInterval()
@@ -140,6 +144,11 @@ public partial class CommentScannerWindow : Window
         return PollIntervalComboBox.SelectedValue is int seconds
             ? TimeSpan.FromSeconds(seconds)
             : TimeSpan.FromSeconds(20);
+    }
+
+    private bool IsBurstSelected()
+    {
+        return PollIntervalComboBox.SelectedValue is int seconds && seconds <= 1;
     }
 
     private void LoadLastVideoUrlForSelectedChannel()

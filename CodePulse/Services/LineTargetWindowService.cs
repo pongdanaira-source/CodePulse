@@ -77,8 +77,18 @@ public sealed class LineTargetWindowService
 
     public bool TryRestoreByTitle(string title, out WindowHandleInfo window)
     {
+        var savedTitle = title.Trim();
         window = GetLineWindows()
-            .FirstOrDefault(candidate => candidate.Title.Equals(title, StringComparison.Ordinal));
+            .FirstOrDefault(candidate => candidate.Title.Equals(savedTitle, StringComparison.Ordinal));
+
+        if (window.Handle == IntPtr.Zero && !string.IsNullOrWhiteSpace(savedTitle))
+        {
+            window = GetLineWindows()
+                .FirstOrDefault(candidate =>
+                    !candidate.Title.Equals("LINE", StringComparison.OrdinalIgnoreCase) &&
+                    (candidate.Title.Contains(savedTitle, StringComparison.OrdinalIgnoreCase) ||
+                     savedTitle.Contains(candidate.Title, StringComparison.OrdinalIgnoreCase)));
+        }
 
         if (window.Handle == IntPtr.Zero)
         {

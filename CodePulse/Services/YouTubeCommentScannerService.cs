@@ -7,9 +7,15 @@ public sealed class YouTubeCommentScannerService
 {
     private const int InitialMaxResults = 100;
     private const int PollMaxResults = 20;
+    private const int BurstMaxResults = 20;
+    private const int BurstMaxRequests = 400;
+    private const int BurstUsageLogEveryRequests = 10;
     private const string HealthCheckVideoId = "dQw4w9WgXcQ";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan MinimumPollInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan BurstMaxDuration = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan TransientErrorBackoff = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan HttpRequestTimeout = TimeSpan.FromSeconds(5);
 
     private readonly AppSettings _settings;
     private readonly AppLogService _appLogService;
@@ -30,6 +36,7 @@ public sealed class YouTubeCommentScannerService
         _appLogService = appLogService;
         _watchCoordinator = watchCoordinator;
         _apiUsageTracker = apiUsageTracker ?? new ApiUsageTracker();
+        _httpClient.Timeout = HttpRequestTimeout;
     }
 
     public bool IsRunning(Guid channelId)
@@ -126,13 +133,19 @@ public sealed class YouTubeCommentScannerService
 
         var source = new CancellationTokenSource();
         var effectivePollInterval = pollInterval < MinimumPollInterval ? MinimumPollInterval : pollInterval;
-        var runtime = new CommentScannerRuntime(channel, videoId, effectivePollInterval, source);
+        var isBurst = effectivePollInterval <= MinimumPollInterval;
+        var runtime = new CommentScannerRuntime(channel, videoId, effectivePollInterval, source, isBurst);
         lock (_sync)
         {
             _runningScanners[channel.Id] = runtime;
         }
 
         _appLogService.Write($"[{channel.Name}] เริ่มดักคอมเมนต์เจ้าของช่องทุก {effectivePollInterval.TotalSeconds:0} วิ: {videoId}");
+        if (isBurst)
+        {
+            _appLogService.Write($"[{channel.Name}] Comment Burst enabled: 1s polling, 5m limit, {BurstMaxRequests} request guard");
+        }
+
         runtime.Task = Task.Run(() => RunScannerAsync(runtime, refreshChannels), CancellationToken.None);
         return true;
     }
@@ -185,12 +198,23 @@ public sealed class YouTubeCommentScannerService
         try
         {
             await EnsureOwnerChannelIdAsync(runtime, runtime.CancellationTokenSource.Token);
-            await PollOnceAsync(runtime, InitialMaxResults, runtime.CancellationTokenSource.Token);
+            await PollWithRecoveryAsync(runtime, runtime.InitialMaxResults, runtime.CancellationTokenSource.Token);
 
-            using var timer = new PeriodicTimer(runtime.PollInterval);
-            while (await timer.WaitForNextTickAsync(runtime.CancellationTokenSource.Token))
+            var stopReason = string.Empty;
+            while (!runtime.ShouldStopByBurstLimits(out stopReason))
             {
-                await PollOnceAsync(runtime, PollMaxResults, runtime.CancellationTokenSource.Token);
+                await Task.Delay(runtime.NextPollDelay, runtime.CancellationTokenSource.Token);
+                if (runtime.ShouldStopByBurstLimits(out stopReason))
+                {
+                    break;
+                }
+
+                await PollWithRecoveryAsync(runtime, runtime.PollMaxResults, runtime.CancellationTokenSource.Token);
+            }
+
+            if (!string.IsNullOrWhiteSpace(stopReason))
+            {
+                _appLogService.Write($"[{runtime.Channel.Name}] Comment Burst stopped: {stopReason}");
             }
         }
         catch (OperationCanceledException)
@@ -216,15 +240,38 @@ public sealed class YouTubeCommentScannerService
         }
     }
 
+    private async Task PollWithRecoveryAsync(CommentScannerRuntime runtime, int maxResults, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PollOnceAsync(runtime, maxResults, cancellationToken);
+            runtime.ConsecutiveTransientErrors = 0;
+            runtime.NextPollDelay = runtime.PollInterval;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsTransientScannerFailure(ex))
+        {
+            runtime.ConsecutiveTransientErrors++;
+            runtime.NextPollDelay = TransientErrorBackoff;
+            _appLogService.Write(
+                $"[{runtime.Channel.Name}] Comment scanner temporary error, backing off {TransientErrorBackoff.TotalSeconds:0}s: {Summarize(ex)}");
+        }
+    }
+
     private async Task PollOnceAsync(CommentScannerRuntime runtime, int maxResults, CancellationToken cancellationToken)
     {
         await EnsureOwnerChannelIdAsync(runtime, cancellationToken);
 
         var content = await GetYouTubeApiJsonAsync(
             key => BuildCommentThreadsUrl(runtime.VideoId, maxResults, key),
-            cancellationToken);
+            cancellationToken,
+            runtime);
 
         var comments = ParseComments(content);
+        runtime.PollCount++;
         var ownerComments = comments
             .Where(comment => string.Equals(comment.AuthorChannelId, runtime.OwnerChannelId, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -249,14 +296,24 @@ public sealed class YouTubeCommentScannerService
             _appLogService.Write($"[{runtime.Channel.Name}] พบคอมเมนต์เจ้าของช่อง: {TrimForLog(comment.Text)}");
 
             var result = await _watchCoordinator.ProcessOwnerTextAsync(runtime.Channel, comment.Text, cancellationToken);
-            if (result.Status == OwnerTextProcessingStatus.Dispatched && !string.IsNullOrWhiteSpace(result.Code))
+            if (result.Status == OwnerTextProcessingStatus.Dispatched)
             {
-                dispatchedCodes.Add(result.Code);
+                if (result.Codes.Count > 0)
+                {
+                    dispatchedCodes.AddRange(result.Codes);
+                }
+                else if (!string.IsNullOrWhiteSpace(result.Code))
+                {
+                    dispatchedCodes.Add(result.Code);
+                }
             }
         }
 
-        _appLogService.Write(
-            $"[{runtime.Channel.Name}] Comment scan: fetched {comments.Count}, owner {ownerComments.Count}, new owner {processedOwnerComments}, sent {dispatchedCodes.Count}");
+        if (runtime.ShouldLogPollSummary(processedOwnerComments, dispatchedCodes.Count))
+        {
+            _appLogService.Write(
+                $"[{runtime.Channel.Name}] Comment scan: fetched {comments.Count}, owner {ownerComments.Count}, new owner {processedOwnerComments}, sent {dispatchedCodes.Count}");
+        }
     }
 
     private static string BuildCommentThreadsUrl(string videoId, int maxResults, string apiKey)
@@ -312,7 +369,8 @@ public sealed class YouTubeCommentScannerService
 
     private async Task<string> GetYouTubeApiJsonAsync(
         Func<string, string> buildUrl,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CommentScannerRuntime? runtime = null)
     {
         var apiKeys = GetUsableApiKeys();
         if (apiKeys.Count == 0)
@@ -324,14 +382,23 @@ public sealed class YouTubeCommentScannerService
         Exception? lastException = null;
         foreach (var apiKey in apiKeys)
         {
+            if (runtime is not null && !runtime.TryRegisterApiRequest(out var stopReason))
+            {
+                throw new CommentScannerSessionLimitException(stopReason);
+            }
+
             if (!_apiUsageTracker.TryReserveYouTubeUnits(1, effectiveDailyLimit, out var usage))
             {
                 throw new InvalidOperationException(
                     $"YouTube API quota guard reached: {usage.YouTubeDailyUnits}/{effectiveDailyLimit} units today");
             }
 
-            _appLogService.Write(
-                $"[Comment Scanner] YouTube API usage today: {usage.YouTubeDailyUnits}/{effectiveDailyLimit} units");
+            if (ShouldLogYouTubeUsage(runtime))
+            {
+                _appLogService.Write(
+                    $"[Comment Scanner] YouTube API usage today: {usage.YouTubeDailyUnits}/{effectiveDailyLimit} units");
+            }
+
             using var response = await _httpClient.GetAsync(buildUrl(apiKey), cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             if (response.IsSuccessStatusCode)
@@ -341,6 +408,17 @@ public sealed class YouTubeCommentScannerService
 
             var message = $"YouTube API {(int)response.StatusCode}: {TrimForLog(content)}";
             lastException = new InvalidOperationException(message);
+            if (IsRateLimitFailure(content) || (int)response.StatusCode == 429)
+            {
+                lastException = new TransientCommentScannerException(message);
+                continue;
+            }
+
+            if ((int)response.StatusCode >= 500)
+            {
+                throw new TransientCommentScannerException(message);
+            }
+
             if (!IsKeyOrQuotaFailure(content))
             {
                 throw lastException;
@@ -351,6 +429,18 @@ public sealed class YouTubeCommentScannerService
         }
 
         throw lastException ?? new InvalidOperationException("All YouTube API keys failed");
+    }
+
+    private static bool ShouldLogYouTubeUsage(CommentScannerRuntime? runtime)
+    {
+        if (runtime is null || !runtime.IsBurst)
+        {
+            return true;
+        }
+
+        return runtime.ApiRequestCount is 1 ||
+               runtime.ApiRequestCount % BurstUsageLogEveryRequests == 0 ||
+               runtime.ApiRequestCount >= BurstMaxRequests;
     }
 
     private List<string> GetUsableApiKeys()
@@ -396,8 +486,12 @@ public sealed class YouTubeCommentScannerService
     private static bool IsQuotaFailure(string responseBody)
     {
         return responseBody.Contains("quotaExceeded", StringComparison.OrdinalIgnoreCase) ||
-               responseBody.Contains("dailyLimitExceeded", StringComparison.OrdinalIgnoreCase) ||
-               responseBody.Contains("rateLimitExceeded", StringComparison.OrdinalIgnoreCase);
+               responseBody.Contains("dailyLimitExceeded", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRateLimitFailure(string responseBody)
+    {
+        return responseBody.Contains("rateLimitExceeded", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsInvalidKeyFailure(string responseBody)
@@ -574,14 +668,30 @@ public sealed class YouTubeCommentScannerService
         return string.IsNullOrWhiteSpace(message) ? current.GetType().Name : message;
     }
 
+    private static bool IsTransientScannerFailure(Exception exception)
+    {
+        return exception is TransientCommentScannerException ||
+               exception is HttpRequestException ||
+               exception is TaskCanceledException ||
+               exception is TimeoutException;
+    }
+
     private sealed class CommentScannerRuntime
     {
-        public CommentScannerRuntime(ChannelProfile channel, string videoId, TimeSpan pollInterval, CancellationTokenSource cancellationTokenSource)
+        public CommentScannerRuntime(
+            ChannelProfile channel,
+            string videoId,
+            TimeSpan pollInterval,
+            CancellationTokenSource cancellationTokenSource,
+            bool isBurst)
         {
             Channel = channel;
             VideoId = videoId;
             PollInterval = pollInterval;
+            NextPollDelay = pollInterval;
             CancellationTokenSource = cancellationTokenSource;
+            IsBurst = isBurst;
+            StartedAt = DateTimeOffset.Now;
         }
 
         public ChannelProfile Channel { get; }
@@ -592,11 +702,98 @@ public sealed class YouTubeCommentScannerService
 
         public TimeSpan PollInterval { get; }
 
+        public TimeSpan NextPollDelay { get; set; }
+
+        public bool IsBurst { get; }
+
+        public DateTimeOffset StartedAt { get; }
+
+        public int ApiRequestCount { get; private set; }
+
+        public int PollCount { get; set; }
+
+        public int ConsecutiveTransientErrors { get; set; }
+
+        public int InitialMaxResults => IsBurst ? BurstMaxResults : YouTubeCommentScannerService.InitialMaxResults;
+
+        public int PollMaxResults => IsBurst ? BurstMaxResults : YouTubeCommentScannerService.PollMaxResults;
+
         public CancellationTokenSource CancellationTokenSource { get; }
 
         public Dictionary<string, DateTimeOffset?> SeenComments { get; } = new(StringComparer.Ordinal);
 
         public Task? Task { get; set; }
+
+        public bool TryRegisterApiRequest(out string stopReason)
+        {
+            stopReason = string.Empty;
+            if (!IsBurst)
+            {
+                ApiRequestCount++;
+                return true;
+            }
+
+            if (ApiRequestCount >= BurstMaxRequests)
+            {
+                stopReason = $"request guard reached {ApiRequestCount}/{BurstMaxRequests}";
+                return false;
+            }
+
+            ApiRequestCount++;
+            return true;
+        }
+
+        public bool ShouldStopByBurstLimits(out string reason)
+        {
+            reason = string.Empty;
+            if (!IsBurst)
+            {
+                return false;
+            }
+
+            if (DateTimeOffset.Now - StartedAt >= BurstMaxDuration)
+            {
+                reason = $"duration reached {BurstMaxDuration.TotalMinutes:0}m";
+                return true;
+            }
+
+            if (ApiRequestCount >= BurstMaxRequests)
+            {
+                reason = $"request guard reached {ApiRequestCount}/{BurstMaxRequests}";
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool ShouldLogPollSummary(int newOwnerComments, int sentCount)
+        {
+            if (!IsBurst)
+            {
+                return true;
+            }
+
+            return PollCount is 1 ||
+                   PollCount % BurstUsageLogEveryRequests == 0 ||
+                   newOwnerComments > 0 ||
+                   sentCount > 0;
+        }
+    }
+
+    private sealed class TransientCommentScannerException : Exception
+    {
+        public TransientCommentScannerException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    private sealed class CommentScannerSessionLimitException : Exception
+    {
+        public CommentScannerSessionLimitException(string message)
+            : base(message)
+        {
+        }
     }
 
     private sealed record YouTubeCommentInfo(

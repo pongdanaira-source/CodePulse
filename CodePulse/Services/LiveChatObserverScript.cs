@@ -15,6 +15,8 @@ public static class LiveChatObserverScript
                 const seen = new Set();
                 const seenOrder = [];
                 const maxSeenKeys = 4000;
+                let healthIntervalMs = 5000;
+                let healthTimer = null;
                 const messageSelector = [
                     "yt-live-chat-text-message-renderer",
                     "yt-live-chat-paid-message-renderer",
@@ -40,6 +42,7 @@ public static class LiveChatObserverScript
                 const getAuthor = (item) => item.querySelector("#author-name")?.textContent?.trim() || "";
                 const getText = (item) => item.querySelector("#message")?.innerText?.trim() || item.innerText?.trim() || "";
                 const getTimestamp = (item) => item.querySelector("#timestamp")?.textContent?.trim() || "";
+                const looksPotentialCodeText = (text) => /[A-Za-z0-9]{10,}/.test(text || "");
                 const rememberKey = (key) => {
                     if (!key || seen.has(key)) {
                         return false;
@@ -119,6 +122,13 @@ public static class LiveChatObserverScript
                         timestamp: Date.now()
                     });
                 };
+                const startHealthTimer = () => {
+                    if (healthTimer) {
+                        clearInterval(healthTimer);
+                    }
+
+                    healthTimer = setInterval(sendHealth, healthIntervalMs);
+                };
 
                 const processItem = (item) => {
                     if (!(item instanceof HTMLElement)) {
@@ -130,12 +140,23 @@ public static class LiveChatObserverScript
                         return;
                     }
 
+                    const text = getText(item);
+                    post({
+                        type: "activity",
+                        key,
+                        timestamp: Date.now()
+                    });
+
+                    if (!isOwner(item) || !looksPotentialCodeText(text)) {
+                        return;
+                    }
+
                     post({
                         type: "message",
                         key,
                         author: getAuthor(item),
-                        text: getText(item),
-                        isOwner: isOwner(item),
+                        text,
+                        isOwner: true,
                         timestamp: Date.now()
                     });
                 };
@@ -176,8 +197,14 @@ public static class LiveChatObserverScript
                         timestamp: Date.now()
                     });
                     sendHealth();
-                    setInterval(sendHealth, 5000);
+                    startHealthTimer();
                     return true;
+                };
+
+                window.__codePulseSetLowLatencyMode = (enabled) => {
+                    healthIntervalMs = enabled ? 1000 : 5000;
+                    startHealthTimer();
+                    sendHealth();
                 };
 
                 if (!tryInstall()) {

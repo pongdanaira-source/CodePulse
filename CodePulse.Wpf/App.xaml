@@ -109,11 +109,17 @@
                             Visibility="Visible"
                             TrayLeftMouseUp="TrayIcon_OnTrayLeftMouseUp">
                 <tb:TaskbarIcon.ContextMenu>
-                    <ContextMenu>
+                    <ContextMenu Opened="TrayContextMenu_OnOpened">
                         <MenuItem Header="Quick Capture"
                                   Click="QuickCaptureTrayMenuItem_OnClick" />
                         <MenuItem Header="Comments"
                                   Click="CommentsTrayMenuItem_OnClick" />
+                        <MenuItem Header="Watch chat"
+                                  Tag="WatchChat" />
+                        <MenuItem Header="Boost"
+                                  Tag="Boost" />
+                        <MenuItem Header="Settings"
+                                  Click="SettingsTrayMenuItem_OnClick" />
                         <MenuItem Header="Log view"
                                   Click="LogViewTrayMenuItem_OnClick" />
                         <MenuItem Header="Show Main Window"

@@ -29,6 +29,7 @@ internal static class DesktopAutomationHelper
         bool minimizeWindowOnComplete = false,
         bool dryRun = false,
         bool safePaste = true,
+        bool sendEscapeBeforePaste = true,
         Func<WindowHandleInfo, bool>? verificationPredicate = null)
     {
         var completionSource = new TaskCompletionSource<DesktopDispatchResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -81,13 +82,13 @@ internal static class DesktopAutomationHelper
                 Thread.Sleep(Math.Max(safePaste ? SafePasteActivationDelayMs : MinimumActivationDelayMs, pasteDelayMs));
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                if (safePaste && !IsForegroundWindowForDispatch(window.Value.Handle))
                 {
                     completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "target window did not become active"));
                     return;
                 }
 
-                if (safePaste)
+                if (safePaste && sendEscapeBeforePaste)
                 {
                     SendKeys.SendWait("{ESC}");
                     Thread.Sleep(TypeFallbackStepDelayMs);
@@ -104,7 +105,7 @@ internal static class DesktopAutomationHelper
                     }
                 }
 
-                if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                if (safePaste && !IsForegroundWindowForDispatch(window.Value.Handle))
                 {
                     completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "active window changed before paste"));
                     return;
@@ -124,7 +125,7 @@ internal static class DesktopAutomationHelper
                 if (enterAfterPaste)
                 {
                     Thread.Sleep(TypeFallbackStepDelayMs);
-                    if (safePaste && !IsForegroundWindow(window.Value.Handle))
+                    if (safePaste && !IsForegroundWindowForDispatch(window.Value.Handle))
                     {
                         completionSource.TrySetResult(CreateUnsafeDesktopResult(window.Value, "active window changed before enter"));
                         return;
@@ -197,7 +198,8 @@ internal static class DesktopAutomationHelper
         PointF? completionCursorPoint = null,
         bool minimizeWindowOnComplete = false,
         bool dryRun = false,
-        bool safePaste = true)
+        bool safePaste = true,
+        bool sendEscapeBeforePaste = true)
     {
         return DispatchToWindowAsync(
             payload,
@@ -211,7 +213,8 @@ internal static class DesktopAutomationHelper
             completionCursorPoint,
             minimizeWindowOnComplete,
             dryRun,
-            safePaste);
+            safePaste,
+            sendEscapeBeforePaste);
     }
 
     public static bool WindowContainsText(IntPtr handle, string keyword, int maxElements = 250)
@@ -387,9 +390,22 @@ internal static class DesktopAutomationHelper
         };
     }
 
-    private static bool IsForegroundWindow(IntPtr handle)
+    private static bool IsForegroundWindowForDispatch(IntPtr handle)
     {
-        return GetForegroundWindow() == handle;
+        var foregroundHandle = GetForegroundWindow();
+        if (foregroundHandle == handle)
+        {
+            return true;
+        }
+
+        if (foregroundHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(handle, out var targetProcessId);
+        GetWindowThreadProcessId(foregroundHandle, out var foregroundProcessId);
+        return targetProcessId != 0 && targetProcessId == foregroundProcessId;
     }
 
     private static void ActivateWindow(IntPtr handle)

@@ -1,5 +1,7 @@
+using System.IO;
 using System.Windows;
 using CodePulse.Services;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
 namespace CodePulse.Wpf.Windows;
@@ -57,6 +59,17 @@ internal sealed class HiddenWebViewHostWindow : Window, IHiddenWebViewHost
             _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
+            _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Image);
+            _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Media);
+            _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Font);
+            _webView.CoreWebView2.WebResourceRequested += (_, args) =>
+            {
+                args.Response = _webView.CoreWebView2.Environment.CreateWebResourceResponse(
+                    Stream.Null,
+                    204,
+                    "No Content",
+                    string.Empty);
+            };
             _webView.CoreWebView2.WebMessageReceived += (_, args) =>
             {
                 try
@@ -135,6 +148,22 @@ internal sealed class HiddenWebViewHostWindow : Window, IHiddenWebViewHost
     public string? DocumentTitle => Dispatcher.CheckAccess()
         ? _webView.CoreWebView2?.DocumentTitle
         : Dispatcher.Invoke(() => _webView.CoreWebView2?.DocumentTitle);
+
+    public async Task SetLowLatencyModeAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        await InvokeOnUiThreadAsync(async () =>
+        {
+            if (_webView.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            var enabledLiteral = enabled ? "true" : "false";
+            await _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__codePulseSetLowLatencyMode?.({enabledLiteral});");
+        });
+        cancellationToken.ThrowIfCancellationRequested();
+    }
 
     private async Task<bool> WaitForReadyAsync(CancellationToken cancellationToken, Action navigationAction)
     {

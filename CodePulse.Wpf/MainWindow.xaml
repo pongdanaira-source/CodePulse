@@ -11,34 +11,51 @@
         Background="{StaticResource AppBackgroundBrush}"
         Width="1480"
         Height="900"
-        MinWidth="1180"
-        MinHeight="760"
+        MinWidth="760"
+        MinHeight="620"
+        SizeChanged="MainWindow_OnSizeChanged"
         WindowStartupLocation="CenterScreen">
-    <Border Background="{StaticResource AppBackgroundBrush}"
+    <Border x:Name="OuterChrome"
+            Background="{StaticResource AppBackgroundBrush}"
             Padding="18">
-        <Grid>
+        <ScrollViewer x:Name="ShellScrollViewer"
+                      VerticalScrollBarVisibility="Disabled"
+                      HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="False"
+                      PanningMode="VerticalOnly"
+                      PreviewMouseWheel="ShellScrollViewer_OnPreviewMouseWheel">
+        <Grid x:Name="RootLayout">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="14" />
-                <RowDefinition Height="*" />
+                <RowDefinition x:Name="RootHeaderRow" Height="Auto" />
+                <RowDefinition x:Name="RootGapRow" Height="14" />
+                <RowDefinition x:Name="RootMainRow" Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0"
+            <Border x:Name="HeroPanel"
+                    Grid.Row="0"
                     Background="{StaticResource HeroBrush}"
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="22"
                     Padding="16">
-                <Grid>
+                <Grid x:Name="HeaderGrid">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition x:Name="HeaderFirstGapRow" Height="0" />
+                        <RowDefinition x:Name="HeaderStatsRow" Height="0" />
+                        <RowDefinition x:Name="HeaderSecondGapRow" Height="0" />
+                        <RowDefinition x:Name="HeaderActionsRow" Height="0" />
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="18" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="18" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition x:Name="HeaderTitleColumn" Width="Auto" />
+                        <ColumnDefinition x:Name="HeaderTitleGapColumn" Width="18" />
+                        <ColumnDefinition x:Name="HeaderStatsColumn" Width="*" />
+                        <ColumnDefinition x:Name="HeaderActionsGapColumn" Width="18" />
+                        <ColumnDefinition x:Name="HeaderActionsColumn" Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0"
+                    <StackPanel x:Name="HeaderTitlePanel"
+                                Grid.Column="0"
                                 VerticalAlignment="Center">
                         <Border HorizontalAlignment="Left"
                                 Padding="11,4"
@@ -61,29 +78,20 @@
                                    Text="Compact desktop shell for watch, OCR, and dispatch operations" />
                     </StackPanel>
 
-                    <Border Grid.Column="2"
+                    <Border x:Name="HeaderStatsPanel"
+                            Grid.Column="2"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
-                            MinWidth="420"
+                            MinWidth="0"
                             Padding="14,10"
                             Background="#22192327"
                             BorderBrush="#32454C"
                             BorderThickness="1"
                             CornerRadius="16">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="1" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="1" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="1" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.Column="0"
-                                        MinWidth="84"
-                                        Margin="0,0,12,0"
+                        <UniformGrid x:Name="StatsGrid"
+                                     Columns="4">
+                            <StackPanel MinWidth="84"
+                                        Margin="0,0,8,0"
                                         HorizontalAlignment="Stretch">
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
                                            HorizontalAlignment="Center"
@@ -97,14 +105,8 @@
                                            Text="{Binding TotalChannels}" />
                             </StackPanel>
 
-                            <Border Grid.Column="1"
-                                    Width="1"
-                                    Margin="0,2"
-                                    Background="#2F4147" />
-
-                            <StackPanel Grid.Column="2"
-                                        MinWidth="84"
-                                        Margin="12,0"
+                            <StackPanel MinWidth="84"
+                                        Margin="8,0"
                                         HorizontalAlignment="Stretch">
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
                                            HorizontalAlignment="Center"
@@ -117,14 +119,8 @@
                                            Text="{Binding EnabledChannels}" />
                             </StackPanel>
 
-                            <Border Grid.Column="3"
-                                    Width="1"
-                                    Margin="0,2"
-                                    Background="#2F4147" />
-
-                            <StackPanel Grid.Column="4"
-                                        MinWidth="84"
-                                        Margin="12,0"
+                            <StackPanel MinWidth="84"
+                                        Margin="8,0"
                                         HorizontalAlignment="Stretch">
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
                                            HorizontalAlignment="Center"
@@ -138,14 +134,8 @@
                                            Text="{Binding ReadyChannels}" />
                             </StackPanel>
 
-                            <Border Grid.Column="5"
-                                    Width="1"
-                                    Margin="0,2"
-                                    Background="#2F4147" />
-
-                            <StackPanel Grid.Column="6"
-                                        MinWidth="84"
-                                        Margin="12,0,0,0"
+                            <StackPanel MinWidth="84"
+                                        Margin="8,0,0,0"
                                         HorizontalAlignment="Stretch">
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
                                            HorizontalAlignment="Center"
@@ -157,12 +147,14 @@
                                            FontWeight="Bold"
                                            Text="{Binding WatchingChannels}" />
                             </StackPanel>
-                        </Grid>
+                        </UniformGrid>
                     </Border>
 
-                    <StackPanel Grid.Column="4"
+                    <StackPanel x:Name="HeaderActionsPanel"
+                                Grid.Column="4"
                                 VerticalAlignment="Center">
-                        <WrapPanel HorizontalAlignment="Right">
+                        <WrapPanel x:Name="HeaderActionsWrap"
+                                   HorizontalAlignment="Right">
                             <Button Margin="0,0,8,8"
                                     Click="QuickCaptureButton_OnClick">
                                 <StackPanel Orientation="Horizontal"
@@ -229,7 +221,8 @@
                                 </StackPanel>
                             </Button>
                         </WrapPanel>
-                        <TextBlock HorizontalAlignment="Right"
+                        <TextBlock x:Name="SettingsPathTextBlock"
+                                   HorizontalAlignment="Right"
                                    Foreground="{StaticResource MutedBrush}"
                                    FontSize="11"
                                    Text="{Binding SettingsPath}"
@@ -239,29 +232,48 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="2">
+            <ScrollViewer x:Name="MainContentScrollViewer"
+                          Grid.Row="2"
+                          VerticalScrollBarVisibility="Disabled"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False"
+                          PanningMode="VerticalOnly">
+            <Grid x:Name="MainContentGrid">
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="MainTopRow" Height="*" />
+                    <RowDefinition x:Name="MainStackGapRow" Height="0" />
+                    <RowDefinition x:Name="MainBottomRow" Height="0" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="0.98*" />
+                    <ColumnDefinition x:Name="MainLeftColumn" Width="2*" />
+                    <ColumnDefinition x:Name="MainGapColumn" Width="16" />
+                    <ColumnDefinition x:Name="MainRightColumn" Width="1.08*" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0"
+                <Border x:Name="ChannelsPanel"
+                        Grid.Column="0"
                         Style="{StaticResource CardBorderStyle}"
                         Padding="0">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
+                            <RowDefinition x:Name="ChannelsListRow" Height="*" />
                         </Grid.RowDefinitions>
 
-                    <Grid Margin="18,16,18,10">
+                    <Grid x:Name="ChannelHeaderGrid"
+                          Margin="18,16,18,10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition x:Name="ChannelHeaderGapRow" Height="0" />
+                            <RowDefinition x:Name="ChannelHeaderActionsRow" Height="0" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition x:Name="ChannelHeaderTitleColumn" Width="*" />
+                            <ColumnDefinition x:Name="ChannelHeaderActionsColumn" Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Column="0">
+                        <StackPanel x:Name="ChannelHeaderTitlePanel"
+                                    Grid.Column="0">
                             <TextBlock FontSize="19"
                                        FontWeight="SemiBold"
                                        Text="Channels" />
@@ -271,7 +283,8 @@
                                        Text="Sorted for quick watch, OCR, and dispatch checks." />
                         </StackPanel>
 
-                        <WrapPanel Grid.Column="1"
+                        <WrapPanel x:Name="ChannelHeaderActionsPanel"
+                                   Grid.Column="1"
                                    HorizontalAlignment="Right">
                             <Button Margin="0,0,8,8"
                                     Click="EditChannelButton_OnClick"
@@ -336,10 +349,13 @@
                                    Text="Boost" />
                     </Grid>
 
-                    <ListView Grid.Row="1"
+                    <ListView x:Name="ChannelListView"
+                              Grid.Row="1"
                               Margin="10,4,10,10"
                               Background="Transparent"
                               BorderThickness="0"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseWheel="PageScrollChild_OnPreviewMouseWheel"
                               ItemsSource="{Binding Channels}"
                               SelectedItem="{Binding SelectedChannel, Mode=TwoWay}">
                         <ListView.ItemContainerStyle>
@@ -601,16 +617,18 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Column="2">
+                <Grid x:Name="SidePanelGrid"
+                      Grid.Column="2">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="14" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="14" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition x:Name="SideSelectedRow" Height="Auto" />
+                        <RowDefinition x:Name="SideFirstGapRow" Height="14" />
+                        <RowDefinition x:Name="SideActionsRow" Height="Auto" />
+                        <RowDefinition x:Name="SideSecondGapRow" Height="14" />
+                        <RowDefinition x:Name="SideLogRow" Height="*" />
                     </Grid.RowDefinitions>
 
-                <Border Grid.Row="0"
+                <Border x:Name="SelectedChannelPanel"
+                        Grid.Row="0"
                         Background="{StaticResource AccentPanelBrush}"
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="1"
@@ -624,13 +642,15 @@
                                    FontSize="26"
                                    FontWeight="SemiBold"
                                    Text="{Binding SelectedChannel.Name, TargetNullValue=No channel selected}" />
-                        <TextBlock Margin="0,8,0,0"
+                        <TextBlock x:Name="SelectedChannelAvailabilityTextBlock"
+                                   Margin="0,8,0,0"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    FontSize="12"
                                    Text="{Binding SelectedChannelAvailabilityText}"
                                    TextWrapping="Wrap" />
 
-                        <Grid Margin="0,16,0,0">
+                        <Grid x:Name="SelectedChannelDetailsGrid"
+                              Margin="0,16,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -661,17 +681,28 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="2"
+                <Border x:Name="ActionsPanel"
+                        Grid.Row="2"
                         Style="{StaticResource CardBorderStyle}">
-                    <StackPanel>
-                        <TextBlock FontSize="18"
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0"
+                                   FontSize="18"
                                    FontWeight="SemiBold"
                                    Text="Actions" />
-                        <TextBlock Margin="0,4,0,0"
+                        <TextBlock Grid.Row="1"
+                                   Margin="0,4,0,0"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    FontSize="12"
                                    Text="Run watch and OCR controls for the selected channel." />
-                        <UniformGrid Margin="0,16,0,0"
+                        <UniformGrid x:Name="ActionsGrid"
+                                     Grid.Row="2"
+                                     Margin="0,16,0,0"
                                      Columns="2">
                             <Button Margin="0,0,8,8"
                                     Click="StartSelectedButton_OnClick"
@@ -759,10 +790,11 @@
                                 </StackPanel>
                             </Button>
                         </UniformGrid>
-                    </StackPanel>
+                    </Grid>
                 </Border>
 
-                <Border Grid.Row="4"
+                <Border x:Name="LiveLogPanel"
+                        Grid.Row="4"
                         Style="{StaticResource CardBorderStyle}"
                         Padding="0">
                     <Grid>
@@ -824,19 +856,35 @@
                                  Margin="10,0,10,10"
                                  Background="Transparent"
                                  BorderThickness="0"
+                                 HorizontalContentAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 PreviewMouseWheel="PageScrollChild_OnPreviewMouseWheel"
                                  ItemsSource="{Binding LogEntries}">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate DataType="{x:Type model:AppLogEntry}">
                                     <Border x:Name="LogCard"
+                                            HorizontalAlignment="Stretch"
                                             Margin="0,0,0,8"
                                             Padding="9"
                                             Background="{StaticResource SurfaceBrush}"
                                             BorderBrush="{StaticResource BorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="12">
-                                        <DockPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
                                             <Border x:Name="LogTimeBadge"
-                                                    DockPanel.Dock="Left"
+                                                    Grid.Column="0"
                                                     Margin="0,0,10,0"
                                                     Padding="8,3"
                                                     Background="{StaticResource PanelAltBrush}"
@@ -851,10 +899,12 @@
                                                            Text="{Binding Timestamp, StringFormat={}{0:HH:mm:ss}}" />
                                             </Border>
                                             <TextBlock x:Name="LogMessageText"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
                                                        TextWrapping="Wrap"
                                                        FontSize="12"
                                                        Text="{Binding Message}" />
-                                        </DockPanel>
+                                        </Grid>
                                     </Border>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding UseAccentStyle}" Value="True">
@@ -874,6 +924,8 @@
                 </Border>
                 </Grid>
             </Grid>
+            </ScrollViewer>
         </Grid>
+        </ScrollViewer>
     </Border>
 </Window>

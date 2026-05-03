@@ -267,6 +267,53 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             CancellationToken.None);
     }
 
+    public IReadOnlyList<TrayWatchChannelInfo> GetTrayWatchChannels()
+    {
+        return _channels
+            .Where(static channel => !string.IsNullOrWhiteSpace(channel.ChatLink))
+            .Select(static channel => new TrayWatchChannelInfo(
+                channel.Id,
+                channel.Name,
+                channel.Enabled,
+                IsChatWatchActive(channel),
+                channel.LastStatusMessage))
+            .ToList();
+    }
+
+    public async Task StartWatchAsync(Guid channelId)
+    {
+        var channel = _settings.Channels.FirstOrDefault(item => item.Id == channelId);
+        if (channel is null)
+        {
+            _appLogService.Write("Watch chat tray: channel not found");
+            return;
+        }
+
+        if (!channel.Enabled)
+        {
+            _appLogService.Write($"[{channel.Name}] ข้ามการเฝ้าแชท เพราะช่องถูกปิดใช้งาน");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(channel.ChatLink))
+        {
+            _appLogService.Write($"[{channel.Name}] ยังไม่มี watch source สำหรับเฝ้าแชท");
+            return;
+        }
+
+        if (IsChatWatchActive(channel))
+        {
+            _appLogService.Write($"[{channel.Name}] กำลังเฝ้าแชทอยู่แล้ว");
+            return;
+        }
+
+        SelectedChannel = _channels.FirstOrDefault(item => item.Id == channelId) ?? channel;
+        await _watchWorkflowService.StartWatchingChannelsAsync(
+            [channel],
+            RefreshChannelsOnUiThread,
+            CancellationToken.None);
+    }
+
     public async Task<bool> StartSelectedOcrScanAsync()
     {
         if (SelectedChannel is null)
@@ -330,6 +377,86 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             [SelectedChannel],
             static _ => { },
             RefreshChannelsOnUiThread);
+    }
+
+    public void StopWatch(Guid channelId)
+    {
+        var channel = _settings.Channels.FirstOrDefault(item => item.Id == channelId);
+        if (channel is null)
+        {
+            _appLogService.Write("Watch chat tray: channel not found");
+            return;
+        }
+
+        _watchWorkflowService.StopChannels(
+            [channel],
+            static _ => { },
+            RefreshChannelsOnUiThread);
+    }
+
+    public void StopAllChatWatches()
+    {
+        var activeWatchChannels = _settings.Channels
+            .Where(IsChatWatchActive)
+            .ToList();
+
+        if (activeWatchChannels.Count == 0)
+        {
+            _appLogService.Write("ไม่มีช่องที่กำลังเฝ้าแชทอยู่");
+            return;
+        }
+
+        _watchWorkflowService.StopChannels(
+            activeWatchChannels,
+            static _ => { },
+            RefreshChannelsOnUiThread);
+    }
+
+    public IReadOnlyList<TrayBoostChannelInfo> GetTrayBoostChannels()
+    {
+        return _channels
+            .Where(static channel => IsChatWatchActive(channel))
+            .Select(static channel => new TrayBoostChannelInfo(
+                channel.Id,
+                channel.Name,
+                channel.Enabled,
+                channel.IsBoosting,
+                BuildBoostStatusText(channel)))
+            .ToList();
+    }
+
+    public void ToggleBoost(Guid channelId)
+    {
+        var channel = _settings.Channels.FirstOrDefault(item => item.Id == channelId);
+        if (channel is null)
+        {
+            _appLogService.Write("Boost tray: channel not found");
+            return;
+        }
+
+        if (!channel.Enabled && !channel.IsBoosting)
+        {
+            _appLogService.Write($"[{channel.Name}] ข้าม Boost เพราะช่องถูกปิดใช้งาน");
+            return;
+        }
+
+        SelectedChannel = _channels.FirstOrDefault(item => item.Id == channelId) ?? channel;
+        ToggleBoost(channel);
+    }
+
+    public void StopAllBoostsFromTray()
+    {
+        var activeBoostChannels = _settings.Channels
+            .Where(static channel => channel.IsBoosting)
+            .ToList();
+
+        if (activeBoostChannels.Count == 0)
+        {
+            _appLogService.Write("ไม่มีช่องที่กำลัง Boost อยู่");
+            return;
+        }
+
+        StopAllBoosts("หยุด Boost จาก tray");
     }
 
     public void StopAllWatches()
@@ -671,6 +798,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
         channel.IsBoosting = true;
         channel.BoostExpiresAt = DateTimeOffset.Now.AddSeconds(GetBoostTimeoutSeconds());
+        _watchCoordinator.SetBoostMode(channel.Id, true);
         _appLogService.Write($"[{channel.Name}] เริ่ม Boost {GetBoostTimeoutSeconds()} วิ");
         RefreshChannelsOnUiThread();
 
@@ -707,6 +835,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
         channel.IsBoosting = false;
         channel.BoostExpiresAt = null;
+        _watchCoordinator.SetBoostMode(channel.Id, false);
         _appLogService.Write($"[{channel.Name}] {reason}");
         RefreshChannelsOnUiThread();
     }
@@ -825,6 +954,27 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var text = value?.Trim() ?? string.Empty;
         return text.StartsWith("UC", StringComparison.OrdinalIgnoreCase) &&
                text.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_');
+    }
+
+    private static bool IsChatWatchActive(ChannelProfile channel)
+    {
+        return channel.Status is SessionState.LoadingChat or SessionState.Watching or SessionState.NoMessages;
+    }
+
+    private static string BuildBoostStatusText(ChannelProfile channel)
+    {
+        if (!channel.IsBoosting)
+        {
+            return channel.Enabled ? "Ready" : "Disabled";
+        }
+
+        if (channel.BoostExpiresAt is not DateTimeOffset expiresAt)
+        {
+            return "Boosting";
+        }
+
+        var remainingSeconds = Math.Max(0, (int)Math.Ceiling((expiresAt - DateTimeOffset.Now).TotalSeconds));
+        return $"Boosting {remainingSeconds}s";
     }
 
     private static ChannelProfile CloneChannel(ChannelProfile source)

@@ -42,7 +42,7 @@ public sealed class CodeExtractorService
 
         foreach (var prefix in prefixes)
         {
-            foreach (var boosted in ExtractPrefixMatches(text, prefix, message))
+            foreach (var boosted in ExtractPrefixMatches(text, prefix, message, prefixes))
             {
                 candidates.Add(boosted);
             }
@@ -109,21 +109,35 @@ public sealed class CodeExtractorService
                         SourceMessage = sourceMessage
                     });
                 }
-
-                continue;
             }
 
             if (token.Length == GenericCodeLength)
             {
+                if (IsRejectedByPrefixLengthRules(token, prefixes))
+                {
+                    continue;
+                }
+
                 foreach (var candidate in CreateGenericCandidates(token, sourceMessage))
                 {
                     yield return (tokenMatch.Index, candidate);
                 }
             }
+            else if (token.Length > GenericCodeLength)
+            {
+                foreach (var candidate in ExtractJoinedGenericMatches(token, tokenMatch.Index, sourceMessage, prefixes))
+                {
+                    yield return candidate;
+                }
+            }
         }
     }
 
-    private static IEnumerable<(int Index, CodeCandidate Candidate)> ExtractPrefixMatches(string text, PrefixRule prefix, string sourceMessage)
+    private static IEnumerable<(int Index, CodeCandidate Candidate)> ExtractPrefixMatches(
+        string text,
+        PrefixRule prefix,
+        string sourceMessage,
+        IReadOnlyList<PrefixRule> prefixes)
     {
         if (string.IsNullOrWhiteSpace(prefix.Prefix))
         {
@@ -139,7 +153,7 @@ public sealed class CodeExtractorService
             var matchIndex = text.IndexOf(prefix.Prefix, searchStartIndex, StringComparison.OrdinalIgnoreCase);
             if (matchIndex < 0)
             {
-                yield break;
+                break;
             }
 
             searchStartIndex = matchIndex + 1;
@@ -150,6 +164,11 @@ public sealed class CodeExtractorService
 
             var candidateValue = text.Substring(matchIndex, expectedLength);
             if (!candidateValue.All(static character => char.IsAsciiLetterUpper(character) || char.IsDigit(character)))
+            {
+                continue;
+            }
+
+            if (IsRejectedByPrefixLengthRules(candidateValue, prefixes))
             {
                 continue;
             }
@@ -184,6 +203,106 @@ public sealed class CodeExtractorService
         {
             yield return match;
         }
+    }
+
+    private static IEnumerable<(int Index, CodeCandidate Candidate)> ExtractJoinedGenericMatches(
+        string token,
+        int tokenStartIndex,
+        string sourceMessage,
+        IReadOnlyList<PrefixRule> prefixes)
+    {
+        var occupied = new bool[token.Length];
+        foreach (var span in FindPrefixSpans(token, prefixes))
+        {
+            for (var index = span.Start; index < span.Start + span.Length && index < occupied.Length; index++)
+            {
+                occupied[index] = true;
+            }
+        }
+
+        var segmentStart = 0;
+        while (segmentStart < token.Length)
+        {
+            while (segmentStart < token.Length && occupied[segmentStart])
+            {
+                segmentStart++;
+            }
+
+            if (segmentStart >= token.Length)
+            {
+                break;
+            }
+
+            var segmentEnd = segmentStart;
+            while (segmentEnd < token.Length && !occupied[segmentEnd])
+            {
+                segmentEnd++;
+            }
+
+            var segmentLength = segmentEnd - segmentStart;
+            var touchesPrefix = (segmentStart > 0 && occupied[segmentStart - 1]) ||
+                                (segmentEnd < token.Length && occupied[segmentEnd]);
+            if (touchesPrefix && segmentLength % GenericCodeLength == 0)
+            {
+                for (var offset = 0; offset < segmentLength; offset += GenericCodeLength)
+                {
+                    var value = token.Substring(segmentStart + offset, GenericCodeLength);
+                    if (IsRejectedByPrefixLengthRules(value, prefixes))
+                    {
+                        continue;
+                    }
+
+                    foreach (var candidate in CreateGenericCandidates(value, sourceMessage))
+                    {
+                        yield return (tokenStartIndex + segmentStart + offset, candidate);
+                    }
+                }
+            }
+
+            segmentStart = segmentEnd;
+        }
+    }
+
+    private static List<(int Start, int Length)> FindPrefixSpans(string token, IReadOnlyList<PrefixRule> prefixes)
+    {
+        var spans = new List<(int Start, int Length)>();
+        foreach (var prefix in prefixes)
+        {
+            var expectedLength = prefix.Prefix.Length + prefix.SuffixLength;
+            var searchStartIndex = 0;
+            while (searchStartIndex < token.Length)
+            {
+                var matchIndex = token.IndexOf(prefix.Prefix, searchStartIndex, StringComparison.OrdinalIgnoreCase);
+                if (matchIndex < 0)
+                {
+                    break;
+                }
+
+                searchStartIndex = matchIndex + 1;
+                if (matchIndex + expectedLength > token.Length)
+                {
+                    continue;
+                }
+
+                spans.Add((matchIndex, expectedLength));
+            }
+        }
+
+        return spans
+            .OrderBy(static span => span.Start)
+            .ThenByDescending(static span => span.Length)
+            .Aggregate(new List<(int Start, int Length)>(), static (selected, span) =>
+            {
+                var overlaps = selected.Any(existing =>
+                    span.Start < existing.Start + existing.Length &&
+                    existing.Start < span.Start + span.Length);
+                if (!overlaps)
+                {
+                    selected.Add(span);
+                }
+
+                return selected;
+            });
     }
 
     private static Regex BuildGenericCodeRegex()

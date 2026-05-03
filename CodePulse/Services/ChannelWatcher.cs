@@ -10,6 +10,7 @@ public sealed class ChannelWatcher
     private static readonly TimeSpan NoMessageWarningThreshold = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan NoMessageWarningGraceWindow = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan MonitorInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan BoostMonitorInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan DomRecoveryThreshold = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ContainerRecoveryThreshold = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan RecoveryCooldown = TimeSpan.FromSeconds(30);
@@ -52,6 +53,26 @@ public sealed class ChannelWatcher
         {
             return _runningWatchers.ContainsKey(channelId);
         }
+    }
+
+    public void SetBoostMode(Guid channelId, bool enabled)
+    {
+        WatchRuntime? runtime;
+        lock (_sync)
+        {
+            _runningWatchers.TryGetValue(channelId, out runtime);
+            if (runtime is not null)
+            {
+                runtime.LowLatencyMode = enabled;
+            }
+        }
+
+        if (runtime is null)
+        {
+            return;
+        }
+
+        _ = ApplyHostLowLatencyModeAsync(runtime, enabled);
     }
 
     public async Task<bool> StartAsync(ChannelProfile channel, string chatLink, CancellationToken cancellationToken)
@@ -114,6 +135,12 @@ public sealed class ChannelWatcher
             }
 
             session.PageTitle = host.DocumentTitle;
+            if (channel.IsBoosting)
+            {
+                runtime.LowLatencyMode = true;
+                await host.SetLowLatencyModeAsync(true, source.Token);
+            }
+
             channel.Status = SessionState.Watching;
             EmitStatus(channel, "โหลดหน้าแชทสำเร็จ");
             EmitStatus(channel, "เริ่มฟังแชท");
@@ -146,46 +173,70 @@ public sealed class ChannelWatcher
             return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.TooShort };
         }
 
-        var creation = TryCreateDetectedEvent(channel, trimmedText, DateTimeOffset.Now);
-        if (creation.DetectedEvent is null)
+        var candidates = _codeExtractorService.ExtractCandidates(channel, trimmedText);
+        if (candidates.Count == 0)
         {
-            return creation.Result;
+            return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoCode };
         }
 
-        try
+        var detectedAt = DateTimeOffset.Now;
+        var dispatchedCodes = new List<string>();
+        OwnerTextProcessingResult? firstSkippedResult = null;
+
+        foreach (var candidate in candidates)
         {
-            var dispatchSucceeded = await DispatchDetectedEventAsync(creation.DetectedEvent, cancellationToken);
-            if (!dispatchSucceeded)
+            var creation = TryCreateDetectedEvent(channel, candidate, trimmedText, detectedAt);
+            if (creation.DetectedEvent is null)
             {
+                firstSkippedResult ??= creation.Result;
+                continue;
+            }
+
+            try
+            {
+                var dispatchSucceeded = await DispatchDetectedEventAsync(creation.DetectedEvent, cancellationToken);
+                if (!dispatchSucceeded)
+                {
+                    firstSkippedResult ??= new OwnerTextProcessingResult
+                    {
+                        Status = OwnerTextProcessingStatus.DispatchFailed,
+                        Code = creation.DetectedEvent.Candidate.Value,
+                        Message = "ไม่มีปลายทางใดส่งสำเร็จ"
+                    };
+                    continue;
+                }
+
+                dispatchedCodes.Add(creation.DetectedEvent.Candidate.Value);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                channel.Status = SessionState.Error;
+                EmitStatus(channel, $"เกิดข้อผิดพลาดระหว่างส่งต่อ: {Summarize(ex)}");
                 return new OwnerTextProcessingResult
                 {
                     Status = OwnerTextProcessingStatus.DispatchFailed,
                     Code = creation.DetectedEvent.Candidate.Value,
-                    Message = "ไม่มีปลายทางใดส่งสำเร็จ"
+                    Codes = dispatchedCodes,
+                    Message = Summarize(ex)
                 };
             }
+        }
 
+        if (dispatchedCodes.Count > 0)
+        {
             return new OwnerTextProcessingResult
             {
                 Status = OwnerTextProcessingStatus.Dispatched,
-                Code = creation.DetectedEvent.Candidate.Value
+                Code = dispatchedCodes[0],
+                Codes = dispatchedCodes
             };
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            channel.Status = SessionState.Error;
-            EmitStatus(channel, $"เกิดข้อผิดพลาดระหว่างส่งต่อ: {Summarize(ex)}");
-            return new OwnerTextProcessingResult
-            {
-                Status = OwnerTextProcessingStatus.DispatchFailed,
-                Code = creation.DetectedEvent.Candidate.Value,
-                Message = Summarize(ex)
-            };
-        }
+
+        return firstSkippedResult ?? new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoCode };
     }
 
     public async Task<OwnerTextProcessingResult> ProcessExternalDetectedCodeAsync(
@@ -352,6 +403,10 @@ public sealed class ChannelWatcher
                 }
                 break;
 
+            case "activity":
+                MarkChatActivity(session, now);
+                break;
+
             case "message":
                 ProcessChatMessage(root, dispatchWriter, session, now);
                 break;
@@ -369,21 +424,7 @@ public sealed class ChannelWatcher
             return;
         }
 
-        session.LastNewMessageAt = now;
-        session.LastDomHealthyAt = now;
-        session.LastChatContainerSeenAt = now;
-
-        if (session.Channel.Status == SessionState.NoMessages)
-        {
-            session.Channel.Status = SessionState.Watching;
-            var noMessagesAt = session.LastNoMessagesAt;
-            session.LastNoMessagesAt = null;
-
-            if (noMessagesAt is null || now - noMessagesAt.Value >= NoMessageWarningGraceWindow)
-            {
-                EmitStatus(session.Channel, "มีข้อความใหม่ กลับมาเฝ้าแชทต่อ");
-            }
-        }
+        MarkChatActivity(session, now);
 
         var text = root.TryGetProperty("text", out var textElement)
             ? textElement.GetString() ?? string.Empty
@@ -569,9 +610,10 @@ public sealed class ChannelWatcher
         var session = runtime.Session;
         try
         {
-            using var timer = new PeriodicTimer(MonitorInterval);
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            while (true)
             {
+                await Task.Delay(runtime.LowLatencyMode ? BoostMonitorInterval : MonitorInterval, cancellationToken);
+
                 var now = DateTimeOffset.Now;
                 var noMessageDuration = now - session.LastNewMessageAt;
                 var domStaleDuration = now - session.LastDomHealthyAt;
@@ -600,6 +642,43 @@ public sealed class ChannelWatcher
         {
             session.Channel.Status = SessionState.Error;
             EmitStatus(session.Channel, $"เกิดข้อผิดพลาดระหว่างตรวจสถานะหน้าแชท: {Summarize(ex)}");
+        }
+    }
+
+    private async Task ApplyHostLowLatencyModeAsync(WatchRuntime runtime, bool enabled)
+    {
+        try
+        {
+            await runtime.Host.SetLowLatencyModeAsync(enabled, runtime.CancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex)
+        {
+            EmitStatus(runtime.Session.Channel, $"Boost low-latency mode failed: {Summarize(ex)}");
+        }
+    }
+
+    private void MarkChatActivity(LiveSession session, DateTimeOffset now)
+    {
+        session.LastNewMessageAt = now;
+        session.LastDomHealthyAt = now;
+        session.LastChatContainerSeenAt = now;
+
+        if (session.Channel.Status != SessionState.NoMessages)
+        {
+            return;
+        }
+
+        session.Channel.Status = SessionState.Watching;
+        var noMessagesAt = session.LastNoMessagesAt;
+        session.LastNoMessagesAt = null;
+
+        if (noMessagesAt is null || now - noMessagesAt.Value >= NoMessageWarningGraceWindow)
+        {
+            EmitStatus(session.Channel, "มีข้อความใหม่ กลับมาเฝ้าแชทต่อ");
         }
     }
 
@@ -843,6 +922,7 @@ public sealed class ChannelWatcher
         public Task? DispatchTask { get; set; }
         public DateTimeOffset? LastRecoveryAttemptAt { get; set; }
         public bool RecoveryInProgress { get; set; }
+        public bool LowLatencyMode { get; set; }
     }
 
     private readonly record struct WatcherSignal(WatcherSignalKind Kind, string Payload);

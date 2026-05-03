@@ -19,6 +19,7 @@ public sealed class OcrWorkflowService
     private readonly WatchCoordinator _watchCoordinator;
     private readonly TelegramBotClient _telegramBotClient;
     private readonly Dictionary<Guid, OcrNoticeState> _ocrNoticeStates = new();
+    private readonly Dictionary<Guid, DateTimeOffset> _ocrSpaceFallbackAttempts = new();
     private readonly HashSet<string> _sentSuspiciousAlertKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _sentOcrProblemAlertKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _suspiciousAlertedChannelsThisSession = new();
@@ -50,7 +51,9 @@ public sealed class OcrWorkflowService
         bool logStart = true,
         bool suppressNoChangeLogs = false,
         string? capturedImagePath = null,
-        bool allowOcrSpaceFallback = false)
+        bool allowOcrSpaceFallback = false,
+        bool useOcrSpaceFallbackForNoCode = true,
+        TimeSpan? ocrSpaceFallbackCooldown = null)
     {
         if (logStart)
         {
@@ -58,6 +61,7 @@ public sealed class OcrWorkflowService
         }
 
         var ocrReadResult = await _ocrService.ReadAsync(bitmap, cancellationToken);
+        var shouldDeferTesseractProblemAlert = allowOcrSpaceFallback && _settings.EnableOcrSpaceFallback;
         var result = await EvaluateOcrReadResultAsync(
             channel,
             ocrReadResult,
@@ -65,10 +69,23 @@ public sealed class OcrWorkflowService
             emitLog,
             suppressNoChangeLogs,
             capturedImagePath,
-            providerName: "Tesseract");
+            providerName: "Tesseract",
+            deferOcrProblemAlert: shouldDeferTesseractProblemAlert);
 
-        if (!allowOcrSpaceFallback || !ShouldUseOcrSpaceFallback(result) || !_settings.EnableOcrSpaceFallback)
+        if (!allowOcrSpaceFallback ||
+            !ShouldUseOcrSpaceFallback(result, useOcrSpaceFallbackForNoCode) ||
+            !_settings.EnableOcrSpaceFallback)
         {
+            return result;
+        }
+
+        if (!TryReserveOcrSpaceFallback(channel.Id, ocrSpaceFallbackCooldown, out var remainingCooldown))
+        {
+            if (!suppressNoChangeLogs && remainingCooldown > TimeSpan.Zero)
+            {
+                Log(emitLog, channel, $"OCR.space fallback cooldown {remainingCooldown.TotalSeconds:0}s");
+            }
+
             return result;
         }
 
@@ -101,7 +118,8 @@ public sealed class OcrWorkflowService
                 emitLog,
                 suppressNoChangeLogs: false,
                 capturedImagePath: capturedImagePath,
-                providerName: "OCR.space");
+                providerName: "OCR.space",
+                deferOcrProblemAlert: false);
         }
         catch (Exception ex)
         {
@@ -117,7 +135,8 @@ public sealed class OcrWorkflowService
         Action<string> emitLog,
         bool suppressNoChangeLogs,
         string? capturedImagePath,
-        string providerName)
+        string providerName,
+        bool deferOcrProblemAlert)
     {
         if (ocrReadResult.Passes.Count == 0)
         {
@@ -298,13 +317,35 @@ public sealed class OcrWorkflowService
                 Log(emitLog, channel, $"OCR candidates: {string.Join(", ", multipleCodes)}");
             }
 
-            await TrySendOcrProblemAlertAsync(
-                channel,
-                "OCR พบหลายโค้ดในเฟรม",
-                multipleCodes,
-                selectedPass.Pass.Text,
-                cancellationToken,
-                emitLog);
+            if (ShouldDispatchMultipleOcrCodes(providerName, selectedPass.Pass.Text, multipleCodes))
+            {
+                Log(emitLog, channel, "OCR candidates แยกชัดเจน กำลังส่งตรวจทีละโค้ด");
+                var multiDispatchResult = await DispatchMultipleOcrCodesAsync(
+                    channel,
+                    multipleCodes,
+                    selectedPass.Pass.Text,
+                    capturedImagePath,
+                    cancellationToken,
+                    emitLog);
+
+                if (multiDispatchResult.Status == OwnerTextProcessingStatus.Dispatched)
+                {
+                    ResetOcrNotice(channel.Id);
+                }
+
+                return multiDispatchResult;
+            }
+
+            if (!deferOcrProblemAlert)
+            {
+                await TrySendOcrProblemAlertAsync(
+                    channel,
+                    "OCR พบหลายโค้ดในเฟรม",
+                    multipleCodes,
+                    selectedPass.Pass.Text,
+                    cancellationToken,
+                    emitLog);
+            }
 
             return new OwnerTextProcessingResult
             {
@@ -323,13 +364,16 @@ public sealed class OcrWorkflowService
 
         if (isAmbiguous)
         {
-            await TrySendOcrProblemAlertAsync(
-                channel,
-                "OCR ได้หลายผลคะแนนใกล้กัน",
-                groupedCandidates.Take(3).Select(static group => group.Code).ToList(),
-                selectedPass.Pass.Text,
-                cancellationToken,
-                emitLog);
+            if (!deferOcrProblemAlert)
+            {
+                await TrySendOcrProblemAlertAsync(
+                    channel,
+                    "OCR ได้หลายผลคะแนนใกล้กัน",
+                    groupedCandidates.Take(3).Select(static group => group.Code).ToList(),
+                    selectedPass.Pass.Text,
+                    cancellationToken,
+                    emitLog);
+            }
 
             return new OwnerTextProcessingResult
             {
@@ -417,6 +461,87 @@ public sealed class OcrWorkflowService
         }
 
         return result;
+    }
+
+    private async Task<OwnerTextProcessingResult> DispatchMultipleOcrCodesAsync(
+        ChannelProfile channel,
+        IReadOnlyList<string> codes,
+        string sourceText,
+        string? capturedImagePath,
+        CancellationToken cancellationToken,
+        Action<string> emitLog)
+    {
+        var dispatchedCodes = new List<string>();
+        OwnerTextProcessingResult? firstSkippedResult = null;
+        var now = DateTimeOffset.Now;
+        var checkedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var code in codes)
+        {
+            if (!checkedCodes.Add(code))
+            {
+                firstSkippedResult ??= new OwnerTextProcessingResult
+                {
+                    Status = OwnerTextProcessingStatus.Duplicate,
+                    Code = code
+                };
+                Log(emitLog, channel, $"OCR ข้ามโค้ดซ้ำใน candidates: {code}");
+                continue;
+            }
+
+            if (_dailyCodeHistoryService.ContainsForCurrentBusinessDay(channel.Id, code, now))
+            {
+                firstSkippedResult ??= new OwnerTextProcessingResult
+                {
+                    Status = OwnerTextProcessingStatus.AlreadySentToday,
+                    Code = code
+                };
+                Log(emitLog, channel, $"OCR ข้ามโค้ดเก่าของรอบวันนี้ก่อนส่ง: {code}");
+                continue;
+            }
+
+            if (_duplicateGuard.Contains(channel.Id, code))
+            {
+                firstSkippedResult ??= new OwnerTextProcessingResult
+                {
+                    Status = OwnerTextProcessingStatus.Duplicate,
+                    Code = code
+                };
+                Log(emitLog, channel, $"OCR ข้ามโค้ดซ้ำใน session ก่อนส่ง: {code}");
+                continue;
+            }
+
+            var result = await _watchCoordinator.ProcessDetectedCodeAsync(
+                channel,
+                code,
+                sourceText,
+                capturedImagePath,
+                cancellationToken);
+
+            if (result.Status == OwnerTextProcessingStatus.Dispatched && !string.IsNullOrWhiteSpace(result.Code))
+            {
+                dispatchedCodes.Add(result.Code);
+                continue;
+            }
+
+            firstSkippedResult ??= result;
+        }
+
+        if (dispatchedCodes.Count > 0)
+        {
+            return new OwnerTextProcessingResult
+            {
+                Status = OwnerTextProcessingStatus.Dispatched,
+                Code = dispatchedCodes[0],
+                Codes = dispatchedCodes,
+                Message = string.Join(", ", dispatchedCodes)
+            };
+        }
+
+        return firstSkippedResult ?? new OwnerTextProcessingResult
+        {
+            Status = OwnerTextProcessingStatus.NoCode
+        };
     }
 
     private SuspiciousOcrBlob? FindSuspiciousBlob(ChannelProfile channel, OcrReadResult readResult)
@@ -638,12 +763,86 @@ public sealed class OcrWorkflowService
         }
     }
 
-    private static bool ShouldUseOcrSpaceFallback(OwnerTextProcessingResult result)
+    private bool TryReserveOcrSpaceFallback(
+        Guid channelId,
+        TimeSpan? cooldown,
+        out TimeSpan remainingCooldown)
     {
-        return result.Status is OwnerTextProcessingStatus.NoText
-            or OwnerTextProcessingStatus.NoCode
-            or OwnerTextProcessingStatus.LowConfidence
-            or OwnerTextProcessingStatus.Ambiguous;
+        remainingCooldown = TimeSpan.Zero;
+        if (cooldown is null || cooldown.Value <= TimeSpan.Zero)
+        {
+            return true;
+        }
+
+        lock (_sync)
+        {
+            var now = DateTimeOffset.Now;
+            if (_ocrSpaceFallbackAttempts.TryGetValue(channelId, out var lastAttempt))
+            {
+                var elapsed = now - lastAttempt;
+                if (elapsed < cooldown.Value)
+                {
+                    remainingCooldown = cooldown.Value - elapsed;
+                    return false;
+                }
+            }
+
+            _ocrSpaceFallbackAttempts[channelId] = now;
+            return true;
+        }
+    }
+
+    private static bool ShouldUseOcrSpaceFallback(
+        OwnerTextProcessingResult result,
+        bool useForNoCode)
+    {
+        return result.Status switch
+        {
+            OwnerTextProcessingStatus.LowConfidence => true,
+            OwnerTextProcessingStatus.Ambiguous => true,
+            OwnerTextProcessingStatus.NoText => useForNoCode,
+            OwnerTextProcessingStatus.NoCode => useForNoCode,
+            _ => false
+        };
+    }
+
+    private static bool ShouldDispatchMultipleOcrCodes(
+        string providerName,
+        string sourceText,
+        IReadOnlyList<string> codes)
+    {
+        if (!string.Equals(providerName, "OCR.space", StringComparison.OrdinalIgnoreCase) ||
+            codes.Count < 2 ||
+            codes.Count > 4)
+        {
+            return false;
+        }
+
+        var normalizedSource = NormalizeCodeLikeText(sourceText);
+        if (string.IsNullOrWhiteSpace(normalizedSource))
+        {
+            return false;
+        }
+
+        var searchStartIndex = 0;
+        foreach (var code in codes)
+        {
+            var normalizedCode = NormalizeCodeLikeText(code);
+            if (normalizedCode.Length < 10)
+            {
+                return false;
+            }
+
+            var matchIndex = normalizedSource.IndexOf(normalizedCode, searchStartIndex, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                return false;
+            }
+
+            searchStartIndex = matchIndex + normalizedCode.Length;
+        }
+
+        return true;
     }
 
     private static string TrimForDebugLog(string value)

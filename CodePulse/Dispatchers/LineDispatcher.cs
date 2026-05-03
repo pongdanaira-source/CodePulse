@@ -19,12 +19,17 @@ public sealed class LineDispatcher
     {
         if (!_lineTargetWindowService.TryGetSelectedLiveWindow(out var selectedWindow))
         {
-            return Task.FromResult(new DesktopDispatchResult
+            var savedTitle = _settings.Dispatch.LineTargetWindowTitle.Trim();
+            if (string.IsNullOrWhiteSpace(savedTitle) ||
+                !_lineTargetWindowService.TryRestoreByTitle(savedTitle, out selectedWindow))
             {
-                Success = false,
-                WindowFound = false,
-                TargetNotSelected = true
-            });
+                return Task.FromResult(new DesktopDispatchResult
+                {
+                    Success = false,
+                    WindowFound = false,
+                    TargetNotSelected = true
+                });
+            }
         }
 
         return DesktopAutomationHelper.DispatchToHandleAsync(
@@ -45,6 +50,7 @@ public sealed class LineDispatcher
             completionCursorPoint: new PointF(0.92f, 0.985f),
             minimizeWindowOnComplete: true,
             dryRun: _settings.Dispatch.EnableDryRun,
-            safePaste: _settings.Dispatch.EnableSafeDesktopPaste);
+            safePaste: _settings.Dispatch.EnableSafeDesktopPaste,
+            sendEscapeBeforePaste: false);
     }
 }

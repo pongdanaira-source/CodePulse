@@ -118,6 +118,11 @@ public sealed class WatchCoordinator
         LogEmitted?.Invoke($"[{channel.Name}] หยุดการเฝ้าดู");
     }
 
+    public void SetBoostMode(Guid channelId, bool enabled)
+    {
+        _channelWatcher.SetBoostMode(channelId, enabled);
+    }
+
     public void ShutdownAll()
     {
         foreach (var channel in _settings.Channels)
