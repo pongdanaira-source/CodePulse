@@ -6,21 +6,78 @@ namespace CodePulse.Services;
 public sealed class CodeExtractorService
 {
     private const int GenericCodeLength = 10;
+    private const int MaxThaiAliasBridgeSeparatorLength = 8;
     private static readonly IReadOnlyDictionary<char, char> GenericAmbiguousCharacterMap = new Dictionary<char, char>
     {
         ['O'] = '9',
         ['Q'] = '9',
         ['G'] = '9'
     };
-
-    public CodeCandidate? ExtractBestCandidate(ChannelProfile channel, string message)
+    private static readonly IReadOnlyList<ThaiCodeAlias> ThaiCodeAliases = new List<ThaiCodeAlias>
     {
-        return ExtractCandidates(channel, message)
+        new("ดับเบิลยู", 'W'),
+        new("ดับเบิ้ลยู", 'W'),
+        new("ดับบลิว", 'W'),
+        new("เอ็กซ์", 'X'),
+        new("เอ็ก", 'X'),
+        new("แอล", 'L'),
+        new("เอล", 'L'),
+        new("เอ็ม", 'M'),
+        new("เอ็น", 'N'),
+        new("เอช", 'H'),
+        new("เอส", 'S'),
+        new("เอฟ", 'F'),
+        new("อาร์", 'R'),
+        new("คิว", 'Q'),
+        new("แซด", 'Z'),
+        new("ศูนย์", '0'),
+        new("ศูน", '0'),
+        new("สูน", '0'),
+        new("หนึ่ง", '1'),
+        new("นึง", '1'),
+        new("สอง", '2'),
+        new("สาม", '3'),
+        new("สี่", '4'),
+        new("สี", '4'),
+        new("ห้า", '5'),
+        new("หก", '6'),
+        new("เจ็ด", '7'),
+        new("เจต", '7'),
+        new("แปด", '8'),
+        new("เก้า", '9'),
+        new("เอ", 'A'),
+        new("บี", 'B'),
+        new("ซี", 'C'),
+        new("ดี", 'D'),
+        new("อี", 'E'),
+        new("จี", 'G'),
+        new("ไอ", 'I'),
+        new("เจ", 'J'),
+        new("เค", 'K'),
+        new("โอ", 'O'),
+        new("พี", 'P'),
+        new("ที", 'T'),
+        new("ยู", 'U'),
+        new("วี", 'V'),
+        new("วาย", 'Y')
+    }
+    .OrderByDescending(static alias => alias.Text.Length)
+    .ToList();
+
+    public CodeCandidate? ExtractBestCandidate(
+        ChannelProfile channel,
+        string message,
+        bool normalizeThaiCodeAliases = true)
+    {
+        return ExtractCandidates(channel, message, normalizeThaiCodeAliases)
             .OrderByDescending(static candidate => candidate.Score)
             .FirstOrDefault();
     }
 
-    public IReadOnlyList<CodeCandidate> ExtractCandidates(ChannelProfile channel, string message)
+    public IReadOnlyList<CodeCandidate> ExtractCandidates(
+        ChannelProfile channel,
+        string message,
+        bool normalizeThaiCodeAliases = true)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
@@ -28,13 +85,17 @@ public sealed class CodeExtractorService
         }
 
         var text = message.Trim().ToUpperInvariant();
+        var prefixes = GetPrefixes(channel);
+        if (normalizeThaiCodeAliases)
+        {
+            text = NormalizeCodeAdjacentThaiAliases(text, prefixes);
+        }
         if (text.Length < GenericCodeLength)
         {
             return [];
         }
 
         var candidates = new List<(int Index, CodeCandidate Candidate)>();
-        var prefixes = GetPrefixes(channel);
         foreach (var tokenMatch in ExtractTokenMatches(text, message, prefixes))
         {
             candidates.Add(tokenMatch);
@@ -370,6 +431,230 @@ public sealed class CodeExtractorService
         }
     }
 
+    private static string NormalizeCodeAdjacentThaiAliases(
+        string text,
+        IReadOnlyList<PrefixRule> prefixes)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            !text.Any(IsThaiCharacter))
+        {
+            return text;
+        }
+
+        var normalized = text;
+        var searchIndex = 0;
+        while (searchIndex < normalized.Length)
+        {
+            var replaced = false;
+            foreach (var alias in ThaiCodeAliases)
+            {
+                if (searchIndex + alias.Text.Length > normalized.Length ||
+                    !normalized.AsSpan(searchIndex, alias.Text.Length).SequenceEqual(alias.Text))
+                {
+                    continue;
+                }
+
+                var nextIndex = searchIndex + alias.Text.Length;
+                if (!TouchesCodeRun(normalized, searchIndex, nextIndex))
+                {
+                    if (!TryBuildSeparatedThaiAliasReplacement(
+                            normalized,
+                            searchIndex,
+                            alias,
+                            prefixes,
+                            out var replacementStart,
+                            out var replacementLength,
+                            out var replacementText))
+                    {
+                        continue;
+                    }
+
+                    normalized = normalized
+                        .Remove(replacementStart, replacementLength)
+                        .Insert(replacementStart, replacementText);
+                    searchIndex = replacementStart + replacementText.Length;
+                    replaced = true;
+                    break;
+                }
+
+                normalized = normalized
+                    .Remove(searchIndex, alias.Text.Length)
+                    .Insert(searchIndex, alias.Replacement.ToString());
+                searchIndex++;
+                replaced = true;
+                break;
+            }
+
+            if (!replaced)
+            {
+                searchIndex++;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static bool TryBuildSeparatedThaiAliasReplacement(
+        string text,
+        int aliasStartIndex,
+        ThaiCodeAlias alias,
+        IReadOnlyList<PrefixRule> prefixes,
+        out int replacementStart,
+        out int replacementLength,
+        out string replacementText)
+    {
+        replacementStart = 0;
+        replacementLength = 0;
+        replacementText = string.Empty;
+
+        var aliasEndIndex = aliasStartIndex + alias.Text.Length;
+        var leftRun = GetLeftAsciiRunAcrossBridge(text, aliasStartIndex, out var leftRunStart, out var leftRunEnd);
+        var rightRun = GetRightAsciiRunAcrossBridge(text, aliasEndIndex, out var rightRunStart, out var rightRunEnd);
+
+        if (leftRun.Length > 0 && rightRun.Length > 0)
+        {
+            var combined = leftRun + alias.Replacement + rightRun;
+            if (IsAcceptedNormalizedCode(combined, prefixes))
+            {
+                replacementStart = leftRunStart;
+                replacementLength = rightRunEnd - leftRunStart;
+                replacementText = combined;
+                return true;
+            }
+        }
+
+        if (leftRun.Length > 0)
+        {
+            var leftCombined = leftRun + alias.Replacement;
+            if (IsAcceptedNormalizedCode(leftCombined, prefixes))
+            {
+                replacementStart = leftRunStart;
+                replacementLength = aliasEndIndex - leftRunStart;
+                replacementText = leftCombined;
+                return true;
+            }
+        }
+
+        if (rightRun.Length > 0)
+        {
+            var rightCombined = alias.Replacement + rightRun;
+            if (IsAcceptedNormalizedCode(rightCombined, prefixes))
+            {
+                replacementStart = aliasStartIndex;
+                replacementLength = rightRunEnd - aliasStartIndex;
+                replacementText = rightCombined;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string GetLeftAsciiRunAcrossBridge(
+        string text,
+        int bridgeEnd,
+        out int runStart,
+        out int runEnd)
+    {
+        runStart = bridgeEnd;
+        runEnd = bridgeEnd;
+
+        var index = bridgeEnd - 1;
+        var bridgeLength = 0;
+        while (index >= 0 &&
+               bridgeLength < MaxThaiAliasBridgeSeparatorLength &&
+               IsCodeBridgeSeparator(text[index]))
+        {
+            index--;
+            bridgeLength++;
+        }
+
+        runEnd = index + 1;
+        if (runEnd == bridgeEnd || index < 0 || !char.IsAsciiLetterOrDigit(text[index]))
+        {
+            return string.Empty;
+        }
+
+        while (index >= 0 && char.IsAsciiLetterOrDigit(text[index]))
+        {
+            index--;
+        }
+
+        runStart = index + 1;
+        return text.Substring(runStart, runEnd - runStart);
+    }
+
+    private static string GetRightAsciiRunAcrossBridge(
+        string text,
+        int bridgeStart,
+        out int runStart,
+        out int runEnd)
+    {
+        runStart = bridgeStart;
+        runEnd = bridgeStart;
+
+        var index = bridgeStart;
+        var bridgeLength = 0;
+        while (index < text.Length &&
+               bridgeLength < MaxThaiAliasBridgeSeparatorLength &&
+               IsCodeBridgeSeparator(text[index]))
+        {
+            index++;
+            bridgeLength++;
+        }
+
+        runStart = index;
+        if (runStart == bridgeStart || index >= text.Length || !char.IsAsciiLetterOrDigit(text[index]))
+        {
+            return string.Empty;
+        }
+
+        while (index < text.Length && char.IsAsciiLetterOrDigit(text[index]))
+        {
+            index++;
+        }
+
+        runEnd = index;
+        return text.Substring(runStart, runEnd - runStart);
+    }
+
+    private static bool IsAcceptedNormalizedCode(string value, IReadOnlyList<PrefixRule> prefixes)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !value.All(static character => char.IsAsciiLetterUpper(character) || char.IsDigit(character)))
+        {
+            return false;
+        }
+
+        foreach (var prefix in prefixes)
+        {
+            if (!value.StartsWith(prefix.Prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return value.Length == prefix.Prefix.Length + prefix.SuffixLength;
+        }
+
+        return value.Length == GenericCodeLength;
+    }
+
+    private static bool TouchesCodeRun(string text, int startIndex, int nextIndex)
+    {
+        return (startIndex > 0 && char.IsAsciiLetterOrDigit(text[startIndex - 1])) ||
+               (nextIndex < text.Length && char.IsAsciiLetterOrDigit(text[nextIndex]));
+    }
+
+    private static bool IsCodeBridgeSeparator(char value)
+    {
+        return char.IsWhiteSpace(value) || value is '-' or '_' or '/' or '\\' or '.' or ':' or ',' or ';' or '|';
+    }
+
+    private static bool IsThaiCharacter(char value)
+    {
+        return value is >= '\u0E00' and <= '\u0E7F';
+    }
+
     private static List<PrefixRule> GetPrefixes(ChannelProfile channel)
     {
         var prefixes = new List<string> { "KOL", "BRAND" };
@@ -380,4 +665,6 @@ public sealed class CodeExtractorService
             .ThenByDescending(static prefix => prefix.SuffixLength)
             .ToList();
     }
+
+    private readonly record struct ThaiCodeAlias(string Text, char Replacement);
 }

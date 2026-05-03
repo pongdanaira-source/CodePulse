@@ -150,7 +150,7 @@ public sealed class OcrWorkflowService
 
         var passCandidates = ocrReadResult.Passes
             .SelectMany(pass => _codeExtractorService
-                .ExtractCandidates(channel, pass.Text)
+                .ExtractCandidates(channel, pass.Text, normalizeThaiCodeAliases: false)
                 .Select(candidate => new
                 {
                     Pass = pass,
@@ -602,7 +602,7 @@ public sealed class OcrWorkflowService
         }
 
         return _codeExtractorService
-            .ExtractCandidates(channel, normalizedText)
+            .ExtractCandidates(channel, normalizedText, normalizeThaiCodeAliases: false)
             .Where(candidate => knownCodes.All(knownCode => !candidate.Value.Equals(knownCode, StringComparison.OrdinalIgnoreCase)))
             .DistinctBy(static candidate => candidate.Value, StringComparer.OrdinalIgnoreCase)
             .DistinctBy(static candidate => candidate.Value, StringComparer.OrdinalIgnoreCase)
