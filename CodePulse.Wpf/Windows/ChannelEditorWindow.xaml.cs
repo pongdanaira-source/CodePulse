@@ -18,6 +18,7 @@ public partial class ChannelEditorWindow : Window
         ChatLinkTextBox.Text = draft.ChatLink;
         PrefixesTextBox.Text = string.Join(Environment.NewLine, PrefixRule.ParseMany(draft.Prefixes).Select(static rule => rule.DisplayText));
         EnabledCheckBox.IsChecked = draft.Enabled;
+        PrefixOnlyCheckBox.IsChecked = draft.PrefixOnly;
         EnableAutoScanCheckBox.IsChecked = draft.EnableAutoScan;
         AutoScanIntervalTextBox.Text = draft.AutoScanIntervalMs.ToString();
     }
@@ -77,12 +78,19 @@ public partial class ChannelEditorWindow : Window
             return false;
         }
 
+        if (PrefixOnlyCheckBox.IsChecked == true && rawPrefixes.Length == 0)
+        {
+            validationMessage = "Prefix only requires at least one prefix.";
+            return false;
+        }
+
         result.Name = NameTextBox.Text.Trim();
         result.ChatLink = watchSource;
         result.Prefixes = PrefixRule.ParseMany(rawPrefixes)
             .Select(static rule => rule.DisplayText)
             .ToList();
         result.Enabled = EnabledCheckBox.IsChecked == true;
+        result.PrefixOnly = PrefixOnlyCheckBox.IsChecked == true;
         result.EnableAutoScan = EnableAutoScanCheckBox.IsChecked == true;
         result.AutoScanIntervalMs = autoScanIntervalMs;
 

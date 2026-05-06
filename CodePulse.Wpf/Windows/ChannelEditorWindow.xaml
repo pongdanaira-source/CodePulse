@@ -87,6 +87,9 @@
                             <CheckBox x:Name="EnabledCheckBox"
                                       Margin="0,16,0,0"
                                       Content="Channel enabled" />
+                            <CheckBox x:Name="PrefixOnlyCheckBox"
+                                      Margin="0,12,0,0"
+                                      Content="Prefix only (disable generic 10-character fallback)" />
                             <CheckBox x:Name="EnableAutoScanCheckBox"
                                       Margin="0,12,0,0"
                                       Content="Enable OCR auto-scan for this channel" />

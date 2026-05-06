@@ -40,6 +40,55 @@ public sealed class CodeExtractorServiceTests
     }
 
     [Fact]
+    public void ExtractCandidates_PrefixOnlySkipsGenericCodeInJoinedText()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "FZK",
+            Prefixes = ["KOLFZK"],
+            PrefixOnly = true
+        };
+
+        var candidates = service.ExtractCandidates(channel, "6XWCPEU6N3KOLFZK4NYYKE");
+
+        Assert.DoesNotContain(candidates, candidate => candidate.Value == "6XWCPEU6N3");
+        Assert.Contains(candidates, candidate => candidate.Value == "KOLFZK4NYYKE");
+    }
+
+    [Fact]
+    public void ExtractCandidates_PrefixOnlyDoesNotUseDefaultPrefixes()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "Strict",
+            Prefixes = ["KOLFZK"],
+            PrefixOnly = true
+        };
+
+        var candidates = service.ExtractCandidates(channel, "KOL123456");
+
+        Assert.DoesNotContain(candidates, candidate => candidate.Value == "KOL123456");
+    }
+
+    [Fact]
+    public void ExtractCandidates_PrefixOnlyUsesExplicitShortPrefix()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "Strict",
+            Prefixes = ["KOL"],
+            PrefixOnly = true
+        };
+
+        var candidates = service.ExtractCandidates(channel, "KOL123456");
+
+        Assert.Contains(candidates, candidate => candidate.Value == "KOL123456");
+    }
+
+    [Fact]
     public void ExtractCandidates_DoesNotCutLongPrefixCodeWithShorterDefaultPrefix()
     {
         var service = new CodeExtractorService();

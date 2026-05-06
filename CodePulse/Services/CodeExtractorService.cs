@@ -86,17 +86,29 @@ public sealed class CodeExtractorService
 
         var text = message.Trim().ToUpperInvariant();
         var prefixes = GetPrefixes(channel);
+        var prefixOnly = channel.PrefixOnly;
+        if (prefixOnly && prefixes.Count == 0)
+        {
+            return [];
+        }
+
         if (normalizeThaiCodeAliases)
         {
             text = NormalizeCodeAdjacentThaiAliases(text, prefixes);
         }
-        if (text.Length < GenericCodeLength)
+
+        var minimumCodeLength = prefixOnly
+            ? prefixes.Min(static prefix => prefix.Prefix.Length + prefix.SuffixLength)
+            : prefixes.Count == 0
+                ? GenericCodeLength
+                : Math.Min(GenericCodeLength, prefixes.Min(static prefix => prefix.Prefix.Length + prefix.SuffixLength));
+        if (text.Length < minimumCodeLength)
         {
             return [];
         }
 
         var candidates = new List<(int Index, CodeCandidate Candidate)>();
-        foreach (var tokenMatch in ExtractTokenMatches(text, message, prefixes))
+        foreach (var tokenMatch in ExtractTokenMatches(text, message, prefixes, prefixOnly))
         {
             candidates.Add(tokenMatch);
         }
@@ -109,22 +121,25 @@ public sealed class CodeExtractorService
             }
         }
 
-        var genericCodeRegex = BuildGenericCodeRegex();
-        foreach (Match match in genericCodeRegex.Matches(text))
+        if (!prefixOnly)
         {
-            if (!match.Success)
+            var genericCodeRegex = BuildGenericCodeRegex();
+            foreach (Match match in genericCodeRegex.Matches(text))
             {
-                continue;
-            }
+                if (!match.Success)
+                {
+                    continue;
+                }
 
-            if (IsRejectedByPrefixLengthRules(match.Value, prefixes))
-            {
-                continue;
-            }
+                if (IsRejectedByPrefixLengthRules(match.Value, prefixes))
+                {
+                    continue;
+                }
 
-            foreach (var candidate in CreateGenericCandidates(match.Value, message))
-            {
-                candidates.Add((match.Index, candidate));
+                foreach (var candidate in CreateGenericCandidates(match.Value, message))
+                {
+                    candidates.Add((match.Index, candidate));
+                }
             }
         }
 
@@ -139,7 +154,8 @@ public sealed class CodeExtractorService
     private static IEnumerable<(int Index, CodeCandidate Candidate)> ExtractTokenMatches(
         string text,
         string sourceMessage,
-        IReadOnlyList<PrefixRule> prefixes)
+        IReadOnlyList<PrefixRule> prefixes,
+        bool prefixOnly)
     {
         foreach (Match tokenMatch in Regex.Matches(text, @"[A-Z0-9]+", RegexOptions.CultureInvariant))
         {
@@ -170,6 +186,11 @@ public sealed class CodeExtractorService
                         SourceMessage = sourceMessage
                     });
                 }
+            }
+
+            if (prefixOnly)
+            {
+                continue;
             }
 
             if (token.Length == GenericCodeLength)
@@ -657,7 +678,9 @@ public sealed class CodeExtractorService
 
     private static List<PrefixRule> GetPrefixes(ChannelProfile channel)
     {
-        var prefixes = new List<string> { "KOL", "BRAND" };
+        var prefixes = channel.PrefixOnly
+            ? new List<string>()
+            : new List<string> { "KOL", "BRAND" };
         prefixes.AddRange(channel.Prefixes);
 
         return PrefixRule.ParseMany(prefixes)

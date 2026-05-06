@@ -29,6 +29,8 @@ public sealed class ChannelProfile
 
     public List<string> Prefixes { get; set; } = new();
 
+    public bool PrefixOnly { get; set; }
+
     public CaptureRegion? LastCaptureRegion { get; set; }
 
     public bool EnableAutoScan { get; set; }
@@ -41,7 +43,21 @@ public sealed class ChannelProfile
 
     public DateTimeOffset? LastCheckedAt { get; set; }
 
-    public string PrefixDisplay => string.Join(", ", PrefixRule.ParseMany(Prefixes).Select(static rule => rule.DisplayText));
+    public string PrefixDisplay
+    {
+        get
+        {
+            var prefixText = string.Join(", ", PrefixRule.ParseMany(Prefixes).Select(static rule => rule.DisplayText));
+            if (!PrefixOnly)
+            {
+                return prefixText;
+            }
+
+            return string.IsNullOrWhiteSpace(prefixText)
+                ? "Prefix only: no prefixes"
+                : $"{prefixText} | Prefix only";
+        }
+    }
 
     [JsonIgnore]
     public bool IsBoosting { get; set; }

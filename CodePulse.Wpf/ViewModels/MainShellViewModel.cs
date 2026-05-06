@@ -986,6 +986,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             ChatLink = source.ChatLink,
             Enabled = source.Enabled,
             Prefixes = source.Prefixes.ToList(),
+            PrefixOnly = source.PrefixOnly,
             LastCaptureRegion = source.LastCaptureRegion,
             EnableAutoScan = source.EnableAutoScan,
             AutoScanIntervalMs = source.AutoScanIntervalMs,

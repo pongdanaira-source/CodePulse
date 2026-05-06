@@ -151,6 +151,7 @@ public sealed class WatchCoordinator
             existing.ChatLink = channel.ChatLink;
             existing.Enabled = channel.Enabled;
             existing.Prefixes = channel.Prefixes.ToList();
+            existing.PrefixOnly = channel.PrefixOnly;
             existing.LastCaptureRegion = channel.LastCaptureRegion;
             existing.EnableAutoScan = channel.EnableAutoScan;
             existing.AutoScanIntervalMs = channel.AutoScanIntervalMs;
