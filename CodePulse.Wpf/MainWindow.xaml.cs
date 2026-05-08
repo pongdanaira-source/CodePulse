@@ -26,8 +26,7 @@ public partial class MainWindow : Window
     private bool _quickCaptureLauncherRestoreMainWindowWhenClosed;
     private CommentScannerWindow? _commentScannerWindow;
     private LogViewWindow? _logViewWindow;
-    private ScanRegionPreviewWindow? _scanRegionPreviewWindow;
-    private Guid? _scanRegionPreviewChannelId;
+    private readonly Dictionary<Guid, ScanRegionPreviewWindow> _scanRegionPreviewWindows = new();
 
     public MainWindow()
     {
@@ -377,7 +376,7 @@ public partial class MainWindow : Window
             _logViewWindow = null;
         }
 
-        HideScanRegionPreview();
+        HideAllScanRegionPreviews();
         _viewModel.Shutdown();
         base.OnClosed(e);
     }
@@ -581,14 +580,18 @@ public partial class MainWindow : Window
 
     private void StopSelectedOcrButton_OnClick(object sender, RoutedEventArgs e)
     {
+        var channelId = _viewModel.SelectedChannel?.Id;
         _viewModel.StopSelectedOcrScan();
-        HideScanRegionPreview();
+        if (channelId is not null)
+        {
+            HideScanRegionPreview(channelId.Value);
+        }
     }
 
     private void StopAllButton_OnClick(object sender, RoutedEventArgs e)
     {
         _viewModel.StopAllWatches();
-        HideScanRegionPreview();
+        HideAllScanRegionPreviews();
     }
 
     private void BoostChannelButton_OnClick(object sender, RoutedEventArgs e)
@@ -648,14 +651,28 @@ public partial class MainWindow : Window
 
     private void ScrollLogToLatest()
     {
-        if (_viewModel.LogEntries.Count == 0)
+        if (_viewModel.LogEntries.Count == 0 || !ShouldAutoScrollEmbeddedLog())
         {
             return;
         }
 
+        var latestEntry = _viewModel.LogEntries[^1];
         _ = Dispatcher.InvokeAsync(
-            () => LogListBox.ScrollIntoView(_viewModel.LogEntries[^1]),
+            () =>
+            {
+                if (ShouldAutoScrollEmbeddedLog())
+                {
+                    LogListBox.ScrollIntoView(latestEntry);
+                }
+            },
             DispatcherPriority.Background);
+    }
+
+    private bool ShouldAutoScrollEmbeddedLog()
+    {
+        return !_isMainStacked &&
+               LiveLogPanel.Visibility == Visibility.Visible &&
+               LogListBox.IsVisible;
     }
 
     private void HandleLogEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -752,7 +769,7 @@ public partial class MainWindow : Window
             }
 
             _viewModel.StopSelectedOcrScan();
-            HideScanRegionPreview();
+            HideScanRegionPreview(e.Channel.Id);
             _quickCaptureLauncherWindow.SetInteractionEnabled(true);
             return;
         }
@@ -831,40 +848,84 @@ public partial class MainWindow : Window
 
     private void ShowScanRegionPreview(string channelName, Guid channelId, CodePulse.Models.CaptureRegion region)
     {
-        HideScanRegionPreview();
+        HideScanRegionPreview(channelId);
 
-        _scanRegionPreviewChannelId = channelId;
-        _scanRegionPreviewWindow = new ScanRegionPreviewWindow(channelName, region);
-        _scanRegionPreviewWindow.Show();
+        var window = new ScanRegionPreviewWindow(channelName, region);
+        window.Closed += ScanRegionPreviewWindow_OnClosed;
+        _scanRegionPreviewWindows[channelId] = window;
+        window.Show();
         _scanPreviewMonitorTimer.Start();
     }
 
-    private void HideScanRegionPreview()
+    private void HideScanRegionPreview(Guid channelId)
     {
-        _scanPreviewMonitorTimer.Stop();
-        _scanRegionPreviewChannelId = null;
-
-        if (_scanRegionPreviewWindow is null)
+        if (!_scanRegionPreviewWindows.Remove(channelId, out var window))
         {
             return;
         }
 
-        _scanRegionPreviewWindow.Close();
-        _scanRegionPreviewWindow = null;
+        window.Closed -= ScanRegionPreviewWindow_OnClosed;
+        window.Close();
+        StopScanPreviewMonitorIfIdle();
+    }
+
+    private void HideAllScanRegionPreviews()
+    {
+        _scanPreviewMonitorTimer.Stop();
+
+        foreach (var window in _scanRegionPreviewWindows.Values)
+        {
+            window.Closed -= ScanRegionPreviewWindow_OnClosed;
+            window.Close();
+        }
+
+        _scanRegionPreviewWindows.Clear();
+    }
+
+    private void ScanRegionPreviewWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is not ScanRegionPreviewWindow closedWindow)
+        {
+            return;
+        }
+
+        foreach (var (channelId, window) in _scanRegionPreviewWindows.ToArray())
+        {
+            if (!ReferenceEquals(window, closedWindow))
+            {
+                continue;
+            }
+
+            _scanRegionPreviewWindows.Remove(channelId);
+            break;
+        }
+
+        StopScanPreviewMonitorIfIdle();
+    }
+
+    private void StopScanPreviewMonitorIfIdle()
+    {
+        if (_scanRegionPreviewWindows.Count == 0)
+        {
+            _scanPreviewMonitorTimer.Stop();
+        }
     }
 
     private void ScanPreviewMonitorTimer_OnTick(object? sender, EventArgs e)
     {
-        if (_scanRegionPreviewChannelId is null)
+        if (_scanRegionPreviewWindows.Count == 0)
         {
-            HideScanRegionPreview();
+            _scanPreviewMonitorTimer.Stop();
             return;
         }
 
-        var channel = _viewModel.Channels.FirstOrDefault(item => item.Id == _scanRegionPreviewChannelId.Value);
-        if (channel?.Status is not CodePulse.Enums.SessionState.OcrScanning and not CodePulse.Enums.SessionState.OcrCooldown)
+        foreach (var channelId in _scanRegionPreviewWindows.Keys.ToArray())
         {
-            HideScanRegionPreview();
+            var channel = _viewModel.Channels.FirstOrDefault(item => item.Id == channelId);
+            if (channel?.Status is not CodePulse.Enums.SessionState.OcrScanning and not CodePulse.Enums.SessionState.OcrCooldown)
+            {
+                HideScanRegionPreview(channelId);
+            }
         }
     }
 
