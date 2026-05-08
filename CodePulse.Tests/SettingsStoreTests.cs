@@ -28,6 +28,9 @@ public sealed class SettingsStoreTests
         Assert.Equal("ocr-key", loaded.OcrSpaceApiKey);
         Assert.Equal("youtube-key", loaded.YouTubeApiKey);
         Assert.Equal(["backup-one", "backup-two"], loaded.YouTubeApiBackupKeys);
+        var loadedChannel = Assert.Single(loaded.Channels);
+        Assert.True(loadedChannel.PrefixOnly);
+        Assert.Equal(["ABC"], loadedChannel.Prefixes);
     }
 
     [Fact]
@@ -74,6 +77,9 @@ public sealed class SettingsStoreTests
         Assert.Equal("ocr-key", imported.OcrSpaceApiKey);
         Assert.Equal("youtube-key", imported.YouTubeApiKey);
         Assert.Equal(["backup-one", "backup-two"], imported.YouTubeApiBackupKeys);
+        var importedChannel = Assert.Single(imported.Channels);
+        Assert.True(importedChannel.PrefixOnly);
+        Assert.Equal(["ABC"], importedChannel.Prefixes);
     }
 
     [Fact]
@@ -112,7 +118,8 @@ public sealed class SettingsStoreTests
                     Id = Guid.NewGuid(),
                     Name = "Test channel",
                     Enabled = true,
-                    Prefixes = ["ABC"]
+                    Prefixes = ["ABC"],
+                    PrefixOnly = true
                 }
             ]
         };

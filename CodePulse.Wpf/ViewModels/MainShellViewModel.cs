@@ -51,7 +51,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var codeExtractorService = new CodeExtractorService();
         var dailyCodeHistoryService = new DailyCodeHistoryService(_settingsStore.AppFolderPath);
         var duplicateGuard = new ChannelDuplicateGuard();
-        var apiUsageTracker = new ApiUsageTracker();
+        var apiUsageTracker = new ApiUsageTracker(Path.Combine(_settingsStore.AppFolderPath, "usage-counters.json"));
         _apiUsageTracker = apiUsageTracker;
         var screenCaptureService = new ScreenCaptureService();
         var manualCaptureArtifactService = new ManualCaptureArtifactService();
@@ -1069,5 +1069,41 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard;
         destination.BoostTimeoutSeconds = source.BoostTimeoutSeconds;
         destination.CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls);
+        ApplyChannels(source.Channels, destination.Channels);
+    }
+
+    private static void ApplyChannels(IReadOnlyList<ChannelProfile> sourceChannels, List<ChannelProfile> destinationChannels)
+    {
+        var importedChannelIds = sourceChannels
+            .Select(static channel => channel.Id)
+            .ToHashSet();
+
+        destinationChannels.RemoveAll(channel => !importedChannelIds.Contains(channel.Id));
+        foreach (var sourceChannel in sourceChannels)
+        {
+            var existing = destinationChannels.FirstOrDefault(channel => channel.Id == sourceChannel.Id);
+            if (existing is null)
+            {
+                destinationChannels.Add(CloneChannel(sourceChannel));
+                continue;
+            }
+
+            ApplyChannel(sourceChannel, existing);
+        }
+    }
+
+    private static void ApplyChannel(ChannelProfile source, ChannelProfile destination)
+    {
+        destination.Name = source.Name;
+        destination.ChatLink = source.ChatLink;
+        destination.Enabled = source.Enabled;
+        destination.Prefixes = source.Prefixes.ToList();
+        destination.PrefixOnly = source.PrefixOnly;
+        destination.LastCaptureRegion = source.LastCaptureRegion;
+        destination.EnableAutoScan = source.EnableAutoScan;
+        destination.AutoScanIntervalMs = source.AutoScanIntervalMs;
+        destination.Status = source.Status;
+        destination.LastStatusMessage = source.LastStatusMessage;
+        destination.LastCheckedAt = source.LastCheckedAt;
     }
 }

@@ -89,6 +89,12 @@ public sealed class OcrWorkflowService
             return result;
         }
 
+        if (string.IsNullOrWhiteSpace(_settings.OcrSpaceApiKey))
+        {
+            Log(emitLog, channel, "OCR.space fallback skipped: API key is not configured");
+            return result;
+        }
+
         Log(emitLog, channel, "Tesseract ไม่มั่นใจ กำลังใช้ OCR.space");
 
         try

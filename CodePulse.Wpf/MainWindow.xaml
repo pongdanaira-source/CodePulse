@@ -922,6 +922,45 @@
                         </ListBox>
                     </Grid>
                 </Border>
+
+                <Border x:Name="LogViewShortcutPanel"
+                        Grid.Row="4"
+                        Style="{StaticResource CardBorderStyle}"
+                        Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0"
+                                    VerticalAlignment="Center">
+                            <TextBlock FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Text="Log view" />
+                            <TextBlock Margin="0,3,0,0"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="12"
+                                       Text="{Binding LogEntryCount, StringFormat={}{0} entries in the current live feed}" />
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                MinWidth="150"
+                                VerticalAlignment="Center"
+                                Click="OpenLogViewButton_OnClick">
+                            <StackPanel Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                <TextBlock Margin="0,0,8,0"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="13"
+                                           VerticalAlignment="Center"
+                                           Text="&#xE8A7;" />
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="Open log" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Border>
                 </Grid>
             </Grid>
             </ScrollViewer>

@@ -232,7 +232,8 @@ public partial class MainWindow : Window
             SelectedChannelDetailsGrid.Visibility = Visibility.Collapsed;
             SideSecondGapRow.Height = new GridLength(14);
             SideLogRow.Height = GridLength.Auto;
-            LiveLogPanel.Visibility = Visibility.Visible;
+            LiveLogPanel.Visibility = Visibility.Collapsed;
+            LogViewShortcutPanel.Visibility = Visibility.Visible;
             LogListBox.MaxHeight = 280;
             ApplyActionButtonLayout(stacked: true);
 
@@ -263,6 +264,7 @@ public partial class MainWindow : Window
         SideSecondGapRow.Height = new GridLength(14);
         SideLogRow.Height = new GridLength(1, GridUnitType.Star);
         LiveLogPanel.Visibility = Visibility.Visible;
+        LogViewShortcutPanel.Visibility = Visibility.Collapsed;
         LogListBox.MaxHeight = double.PositiveInfinity;
         ApplyActionButtonLayout(stacked: false);
 
@@ -637,6 +639,11 @@ public partial class MainWindow : Window
     private void ClearLogButton_OnClick(object sender, RoutedEventArgs e)
     {
         _viewModel.ClearLogs();
+    }
+
+    private void OpenLogViewButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ShowLogViewWindow();
     }
 
     private void ScrollLogToLatest()

@@ -12,7 +12,6 @@ namespace CodePulse.Services;
 
 public sealed class OcrService
 {
-    private const string DefaultOcrSpaceApiKey = "helloworld";
     private const float HighConfidenceEarlyExitThreshold = 0.86f;
     private const float FastStageAcceptThreshold = 0.72f;
     private static readonly HttpClient HttpClient = new()
@@ -23,6 +22,9 @@ public sealed class OcrService
     private readonly string _tessDataPath;
     private readonly AppSettings _settings;
     private readonly ApiUsageTracker _apiUsageTracker;
+    private readonly SemaphoreSlim _tesseractSemaphore = new(1, 1);
+    private readonly object _tesseractSync = new();
+    private TesseractEngine? _tesseractEngine;
 
     public OcrService(AppSettings settings, ApiUsageTracker? apiUsageTracker = null)
     {
@@ -41,11 +43,12 @@ public sealed class OcrService
 
             var stages = CreateVariantStages(sourceBitmap);
             var totalStopwatch = Stopwatch.StartNew();
+            var acquiredTesseract = false;
             try
             {
-                using var engine = new TesseractEngine(_tessDataPath, "eng", EngineMode.Default);
-                engine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
-                engine.SetVariable("preserve_interword_spaces", "0");
+                _tesseractSemaphore.Wait(cancellationToken);
+                acquiredTesseract = true;
+                var engine = GetOrCreateTesseractEngine();
 
                 var passes = new List<OcrPassResult>();
                 var stageMetrics = new List<OcrStageMetric>();
@@ -110,6 +113,11 @@ public sealed class OcrService
             }
             finally
             {
+                if (acquiredTesseract)
+                {
+                    _tesseractSemaphore.Release();
+                }
+
                 foreach (var stage in stages)
                 {
                     foreach (var variant in stage)
@@ -124,6 +132,12 @@ public sealed class OcrService
     public async Task<OcrReadResult> ReadWithOcrSpaceAsync(Bitmap sourceBitmap, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var apiKey = GetOcrSpaceApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("OCR.space API key is not configured.");
+        }
+
         if (!_apiUsageTracker.TryReserveOcrSpaceRequest(
                 _settings.OcrSpaceDailyRequestGuard,
                 _settings.OcrSpaceHourlyRequestGuard,
@@ -148,7 +162,7 @@ public sealed class OcrService
         {
             Content = content
         };
-        request.Headers.Add("apikey", GetOcrSpaceApiKey());
+        request.Headers.Add("apikey", apiKey);
 
         using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -199,11 +213,25 @@ public sealed class OcrService
         };
     }
 
+    private TesseractEngine GetOrCreateTesseractEngine()
+    {
+        lock (_tesseractSync)
+        {
+            if (_tesseractEngine is not null)
+            {
+                return _tesseractEngine;
+            }
+
+            _tesseractEngine = new TesseractEngine(_tessDataPath, "eng", EngineMode.Default);
+            _tesseractEngine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+            _tesseractEngine.SetVariable("preserve_interword_spaces", "0");
+            return _tesseractEngine;
+        }
+    }
+
     private string GetOcrSpaceApiKey()
     {
-        return string.IsNullOrWhiteSpace(_settings.OcrSpaceApiKey)
-            ? DefaultOcrSpaceApiKey
-            : _settings.OcrSpaceApiKey.Trim();
+        return _settings.OcrSpaceApiKey.Trim();
     }
 
     private string GetOcrSpaceLanguage()

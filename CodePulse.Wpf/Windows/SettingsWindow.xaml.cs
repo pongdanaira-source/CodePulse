@@ -140,6 +140,7 @@ public partial class SettingsWindow : Window
             ChatLink = source.ChatLink,
             Enabled = source.Enabled,
             Prefixes = source.Prefixes.ToList(),
+            PrefixOnly = source.PrefixOnly,
             LastCaptureRegion = source.LastCaptureRegion,
             EnableAutoScan = false,
             AutoScanIntervalMs = source.AutoScanIntervalMs,
