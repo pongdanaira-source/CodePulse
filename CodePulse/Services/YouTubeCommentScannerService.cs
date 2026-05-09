@@ -7,7 +7,7 @@ public sealed class YouTubeCommentScannerService
 {
     private const int InitialMaxResults = 100;
     private const int PollMaxResults = 20;
-    private const int BurstMaxResults = 20;
+    private const int BurstMaxResults = 100;
     private const int BurstMaxRequests = 400;
     private const int BurstUsageLogEveryRequests = 10;
     private const string HealthCheckVideoId = "dQw4w9WgXcQ";
@@ -143,7 +143,7 @@ public sealed class YouTubeCommentScannerService
         _appLogService.Write($"[{channel.Name}] เริ่มดักคอมเมนต์เจ้าของช่องทุก {effectivePollInterval.TotalSeconds:0} วิ: {videoId}");
         if (isBurst)
         {
-            _appLogService.Write($"[{channel.Name}] Comment Burst enabled: 1s polling, 5m limit, {BurstMaxRequests} request guard");
+            _appLogService.Write($"[{channel.Name}] Comment Burst enabled: 1s polling, latest {BurstMaxResults} comments, 5m limit, {BurstMaxRequests} request guard");
         }
 
         runtime.Task = Task.Run(() => RunScannerAsync(runtime, refreshChannels), CancellationToken.None);

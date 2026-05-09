@@ -121,7 +121,7 @@ public partial class CommentScannerWindow : Window
         {
             SelectedStatusTextBlock.Text = "Running";
             SelectedStatusHintTextBlock.Text = IsBurstSelected()
-                ? $"Burst polling every 1 sec for owner comments on {SelectedChannel!.Name}. Stops after 5 min or 400 requests."
+                ? $"Burst polling every 1 sec for the latest 100 comments on {SelectedChannel!.Name}. Stops after 5 min or 400 requests."
                 : $"Polling every {GetSelectedPollInterval().TotalSeconds:0} sec for owner comments on {SelectedChannel!.Name}.";
             return;
         }
@@ -135,7 +135,7 @@ public partial class CommentScannerWindow : Window
 
         SelectedStatusTextBlock.Text = "Ready";
         SelectedStatusHintTextBlock.Text = IsBurstSelected()
-            ? $"Burst scanner is ready for {SelectedChannel!.Name}: 1 sec, 5 min, 400 request guard."
+            ? $"Burst scanner is ready for {SelectedChannel!.Name}: 1 sec, latest 100 comments, 5 min, 400 request guard."
             : $"Scanner is ready to start for {SelectedChannel!.Name}.";
     }
 
