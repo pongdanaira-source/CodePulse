@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private QuickCaptureLauncherWindow? _quickCaptureLauncherWindow;
     private bool _quickCaptureLauncherRestoreMainWindowWhenClosed;
     private CommentScannerWindow? _commentScannerWindow;
+    private ManualSendWindow? _manualSendWindow;
     private LogViewWindow? _logViewWindow;
     private readonly Dictionary<Guid, ScanRegionPreviewWindow> _scanRegionPreviewWindows = new();
 
@@ -328,28 +329,24 @@ public partial class MainWindow : Window
         ActionsGrid.Columns = stacked ? 1 : 2;
         ActionsGrid.Width = double.NaN;
 
-        var desktopMargins = new[]
-        {
-            new Thickness(0, 0, 8, 8),
-            new Thickness(8, 0, 0, 8),
-            new Thickness(0, 8, 8, 0),
-            new Thickness(8, 8, 0, 0),
-            new Thickness(0, 8, 8, 0),
-            new Thickness(8, 8, 0, 0)
-        };
+        var buttons = ActionsGrid.Children
+            .OfType<Button>()
+            .ToList();
+        var rows = stacked ? buttons.Count : (int)Math.Ceiling(buttons.Count / 2.0);
 
-        var index = 0;
-        foreach (var child in ActionsGrid.Children)
+        for (var index = 0; index < buttons.Count; index++)
         {
-            if (child is not Button button)
-            {
-                continue;
-            }
+            var button = buttons[index];
+            var row = stacked ? index : index / 2;
+            var isLeftColumn = index % 2 == 0;
 
             button.Margin = stacked
-                ? new Thickness(0, 0, 0, 10)
-                : desktopMargins[Math.Min(index, desktopMargins.Length - 1)];
-            index++;
+                ? new Thickness(0, 0, 0, index == buttons.Count - 1 ? 0 : 10)
+                : new Thickness(
+                    isLeftColumn ? 0 : 8,
+                    row == 0 ? 0 : 8,
+                    isLeftColumn ? 8 : 0,
+                    row == rows - 1 ? 0 : 8);
         }
     }
 
@@ -374,6 +371,13 @@ public partial class MainWindow : Window
             _logViewWindow.Closed -= LogViewWindow_OnClosed;
             _logViewWindow.Close();
             _logViewWindow = null;
+        }
+
+        if (_manualSendWindow is not null)
+        {
+            _manualSendWindow.Closed -= ManualSendWindow_OnClosed;
+            _manualSendWindow.Close();
+            _manualSendWindow = null;
         }
 
         HideAllScanRegionPreviews();
@@ -463,6 +467,11 @@ public partial class MainWindow : Window
         ShowCommentScannerWindow();
     }
 
+    private void ManualSendButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ShowManualSendWindow();
+    }
+
     public void ShowCommentScannerWindow()
     {
         var channels = _viewModel.GetCommentScannerChannels();
@@ -493,6 +502,42 @@ public partial class MainWindow : Window
         _commentScannerWindow.Closed += CommentScannerWindow_OnClosed;
         _commentScannerWindow.Show();
         _commentScannerWindow.Activate();
+    }
+
+    public void ShowManualSendWindow()
+    {
+        var channels = _viewModel.GetManualSendChannels();
+        if (channels.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "There are no enabled channels yet. Manual Send needs a channel so it can use the right prefix rules.",
+                "Manual send",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (_manualSendWindow is not null)
+        {
+            _manualSendWindow.Activate();
+            return;
+        }
+
+        _manualSendWindow = new ManualSendWindow(
+            channels,
+            _viewModel.SelectedChannel,
+            _viewModel.ExtractManualCodeCandidates,
+            _viewModel.SendManualCodeAsync);
+
+        if (IsVisible)
+        {
+            _manualSendWindow.Owner = this;
+        }
+
+        _manualSendWindow.Closed += ManualSendWindow_OnClosed;
+        _manualSendWindow.Show();
+        _manualSendWindow.Activate();
     }
 
     public async Task ShowQuickCaptureLauncherAsync(bool restoreMainWindowWhenFinished)
@@ -834,6 +879,15 @@ public partial class MainWindow : Window
         {
             _commentScannerWindow.Closed -= CommentScannerWindow_OnClosed;
             _commentScannerWindow = null;
+        }
+    }
+
+    private void ManualSendWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_manualSendWindow is not null)
+        {
+            _manualSendWindow.Closed -= ManualSendWindow_OnClosed;
+            _manualSendWindow = null;
         }
     }
 

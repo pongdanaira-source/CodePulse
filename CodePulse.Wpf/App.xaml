@@ -114,6 +114,8 @@
                                   Click="QuickCaptureTrayMenuItem_OnClick" />
                         <MenuItem Header="Comments"
                                   Click="CommentsTrayMenuItem_OnClick" />
+                        <MenuItem Header="Send code"
+                                  Click="SendCodeTrayMenuItem_OnClick" />
                         <MenuItem Header="Watch chat"
                                   Tag="WatchChat" />
                         <MenuItem Header="Boost"

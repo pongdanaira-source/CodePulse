@@ -734,6 +734,20 @@
                                 </StackPanel>
                             </Button>
                             <Button Margin="0,8,8,0"
+                                    Click="ManualSendButton_OnClick"
+                                    IsEnabled="{Binding HasSelectedChannel}">
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Margin="0,0,8,0"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="13"
+                                               VerticalAlignment="Center"
+                                               Text="&#xE724;" />
+                                    <TextBlock VerticalAlignment="Center"
+                                               Text="Send code" />
+                                </StackPanel>
+                            </Button>
+                            <Button Margin="8,8,0,0"
                                     Click="CaptureSelectedButton_OnClick"
                                     IsEnabled="{Binding CanCaptureSelected}">
                                 <StackPanel Orientation="Horizontal"

@@ -22,6 +22,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     private readonly SettingsStore _settingsStore;
     private readonly AppSettings _settings;
     private readonly AppLogService _appLogService;
+    private readonly CodeExtractorService _codeExtractorService;
     private readonly WatchCoordinator _watchCoordinator;
     private readonly WatchWorkflowService _watchWorkflowService;
     private readonly CaptureWorkflowService _captureWorkflowService;
@@ -49,6 +50,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
         var telegramBotClient = new TelegramBotClient();
         var codeExtractorService = new CodeExtractorService();
+        _codeExtractorService = codeExtractorService;
         var dailyCodeHistoryService = new DailyCodeHistoryService(_settingsStore.AppFolderPath);
         var duplicateGuard = new ChannelDuplicateGuard();
         var apiUsageTracker = new ApiUsageTracker(Path.Combine(_settingsStore.AppFolderPath, "usage-counters.json"));
@@ -492,6 +494,31 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             .ToList();
     }
 
+    public IReadOnlyList<ChannelProfile> GetManualSendChannels()
+    {
+        return _channels
+            .Where(static channel => channel.Enabled)
+            .ToList();
+    }
+
+    public IReadOnlyList<CodeCandidate> ExtractManualCodeCandidates(ChannelProfile channel, string input)
+    {
+        return _codeExtractorService.ExtractCandidates(channel, input);
+    }
+
+    public async Task<OwnerTextProcessingResult> SendManualCodeAsync(ChannelProfile channel, string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoText };
+        }
+
+        _appLogService.Write($"[{channel.Name}] Manual send requested");
+        var result = await _watchCoordinator.ProcessOwnerTextAsync(channel, input.Trim(), CancellationToken.None);
+        LogManualSendResult(channel, result);
+        return result;
+    }
+
     public string GetLastCommentScannerVideoUrl(ChannelProfile channel)
     {
         return _settings.CommentScannerLastVideoUrls.TryGetValue(channel.Id, out var value)
@@ -712,6 +739,28 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _logEntries.Clear();
         OnPropertyChanged(nameof(LogEntryCount));
         _appLogService.Write("Cleared live log");
+    }
+
+    private void LogManualSendResult(ChannelProfile channel, OwnerTextProcessingResult result)
+    {
+        var codeText = result.Codes.Count > 0
+            ? string.Join(", ", result.Codes)
+            : result.Code ?? "-";
+
+        var message = result.Status switch
+        {
+            OwnerTextProcessingStatus.Dispatched => $"Manual send completed: {codeText}",
+            OwnerTextProcessingStatus.AlreadySentToday => $"Manual send skipped, already sent today: {codeText}",
+            OwnerTextProcessingStatus.Duplicate => $"Manual send skipped, duplicate in this session: {codeText}",
+            OwnerTextProcessingStatus.NoCode => channel.PrefixOnly
+                ? "Manual send skipped, no code matched this channel prefix-only rule"
+                : "Manual send skipped, no code matched",
+            OwnerTextProcessingStatus.TooShort => "Manual send skipped, text is too short",
+            OwnerTextProcessingStatus.DispatchFailed => $"Manual send failed: {result.Message ?? codeText}",
+            _ => $"Manual send finished: {result.Status}"
+        };
+
+        _appLogService.Write($"[{channel.Name}] {message}");
     }
 
     private void HandleChannelsChanged()
