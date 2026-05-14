@@ -374,7 +374,24 @@ public sealed class SettingsStore
             OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard,
             BoostTimeoutSeconds = source.BoostTimeoutSeconds,
             CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls),
+            CommentTimers = source.CommentTimers.Select(CloneCommentTimer).ToList(),
             Channels = source.Channels.Select(CloneChannel).ToList()
+        };
+    }
+
+    private static CommentTimerProfile CloneCommentTimer(CommentTimerProfile source)
+    {
+        return new CommentTimerProfile
+        {
+            Id = source.Id,
+            ChannelId = source.ChannelId,
+            VideoUrl = source.VideoUrl,
+            StartTime = source.StartTime,
+            DurationSeconds = source.DurationSeconds,
+            PollIntervalSeconds = source.PollIntervalSeconds,
+            Enabled = source.Enabled,
+            LastTriggeredDate = source.LastTriggeredDate,
+            LastStatus = source.LastStatus
         };
     }
 

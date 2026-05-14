@@ -105,6 +105,14 @@ public partial class App : Application
         }
     }
 
+    private void CommentTimerTrayMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (Current.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ShowCommentTimerWindow();
+        }
+    }
+
     private void SendCodeTrayMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         if (Current.MainWindow is MainWindow mainWindow)

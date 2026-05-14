@@ -6,6 +6,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 using CodePulse.Dispatchers;
 using CodePulse.Enums;
 using CodePulse.Integrations;
@@ -35,6 +36,8 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     private readonly ObservableCollection<ChannelProfile> _channels = new();
     private readonly ObservableCollection<AppLogEntry> _logEntries = new();
     private readonly Dictionary<Guid, CancellationTokenSource> _boostTokens = new();
+    private readonly Dictionary<Guid, Guid> _activeCommentTimerByChannel = new();
+    private readonly DispatcherTimer _commentTimerSchedulerTimer = new();
     private readonly object _boostSync = new();
     private readonly string _dryRunLogsRootPath;
     private ChannelProfile? _selectedChannel;
@@ -111,7 +114,11 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _dispatchService.LogEmitted += _appLogService.Write;
         _watchCoordinator.ChannelsChanged += HandleChannelsChanged;
         _watchCoordinator.CodeDispatched += HandleCodeDispatched;
+        _commentScannerService.ScannerCompleted += HandleCommentScannerCompleted;
         _appLogService.EntryEmitted += HandleLogEntryEmitted;
+        _commentTimerSchedulerTimer.Interval = TimeSpan.FromSeconds(1);
+        _commentTimerSchedulerTimer.Tick += CommentTimerSchedulerTimer_OnTick;
+        _commentTimerSchedulerTimer.Start();
 
         Channels = new ReadOnlyObservableCollection<ChannelProfile>(_channels);
         LogEntries = new ReadOnlyObservableCollection<AppLogEntry>(_logEntries);
@@ -566,6 +573,107 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         RefreshChannelsOnUiThread();
     }
 
+    public IReadOnlyList<ChannelProfile> GetCommentTimerChannels()
+    {
+        return GetCommentScannerChannels();
+    }
+
+    public IReadOnlyList<CommentTimerProfile> GetCommentTimers()
+    {
+        return _settings.CommentTimers
+            .Select(CloneCommentTimer)
+            .ToList();
+    }
+
+    public void SaveCommentTimer(CommentTimerProfile timer)
+    {
+        var normalized = CloneCommentTimer(timer);
+        normalized.Id = normalized.Id == Guid.Empty ? Guid.NewGuid() : normalized.Id;
+        normalized.VideoUrl = normalized.VideoUrl.Trim();
+        normalized.StartTime = NormalizeTimerStartTime(normalized.StartTime);
+        normalized.DurationSeconds = Math.Clamp(normalized.DurationSeconds, 30, 3600);
+        normalized.PollIntervalSeconds = Math.Clamp(normalized.PollIntervalSeconds, 1, 60);
+        normalized.LastStatus = string.IsNullOrWhiteSpace(normalized.LastStatus)
+            ? "Waiting"
+            : normalized.LastStatus.Trim();
+
+        var existing = _settings.CommentTimers.FirstOrDefault(item => item.Id == normalized.Id);
+        if (existing is null)
+        {
+            _settings.CommentTimers.Add(normalized);
+        }
+        else
+        {
+            ApplyCommentTimer(normalized, existing);
+        }
+
+        _settingsStore.Save(_settings);
+        _appLogService.Write("Comment Timer saved");
+    }
+
+    public void DeleteCommentTimer(Guid timerId)
+    {
+        StopCommentTimer(timerId);
+        _settings.CommentTimers.RemoveAll(item => item.Id == timerId);
+        _settingsStore.Save(_settings);
+        _appLogService.Write("Comment Timer deleted");
+    }
+
+    public bool StartCommentTimerNow(Guid timerId)
+    {
+        var timer = _settings.CommentTimers.FirstOrDefault(item => item.Id == timerId);
+        return timer is not null && StartCommentTimer(timer, manualStart: true);
+    }
+
+    public void StopCommentTimer(Guid timerId)
+    {
+        var activeChannel = _activeCommentTimerByChannel
+            .FirstOrDefault(item => item.Value == timerId);
+        if (activeChannel.Key == Guid.Empty)
+        {
+            return;
+        }
+
+        var channel = _settings.Channels.FirstOrDefault(item => item.Id == activeChannel.Key);
+        if (channel is not null)
+        {
+            _commentScannerService.Stop(channel, RefreshChannelsOnUiThread);
+        }
+
+        _activeCommentTimerByChannel.Remove(activeChannel.Key);
+        var timer = _settings.CommentTimers.FirstOrDefault(item => item.Id == timerId);
+        if (timer is not null)
+        {
+            timer.LastStatus = "Stopped";
+            _settingsStore.Save(_settings);
+        }
+    }
+
+    public string GetCommentTimerStatus(CommentTimerProfile timer)
+    {
+        if (_activeCommentTimerByChannel.TryGetValue(timer.ChannelId, out var activeTimerId) &&
+            activeTimerId == timer.Id &&
+            _commentScannerService.IsRunning(timer.ChannelId))
+        {
+            return "Running";
+        }
+
+        if (!timer.Enabled)
+        {
+            return "Disabled";
+        }
+
+        var today = GetTodayKey();
+        if (string.Equals(timer.LastTriggeredDate, today, StringComparison.Ordinal))
+        {
+            return string.IsNullOrWhiteSpace(timer.LastStatus) ? "Done today" : timer.LastStatus;
+        }
+
+        return TryGetTimerStart(timer, DateTime.Now.Date, out var start)
+            ? $"Next {start:HH:mm}"
+            : "Invalid time";
+    }
+
     public void ToggleBoost(ChannelProfile channel)
     {
         if (channel.IsBoosting)
@@ -704,6 +812,8 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
     public void Shutdown()
     {
         _appLogService.Write("Shutting down WPF shell");
+        _commentTimerSchedulerTimer.Stop();
+        _commentTimerSchedulerTimer.Tick -= CommentTimerSchedulerTimer_OnTick;
         StopAllBoosts("หยุด Boost เพราะปิดโปรแกรม");
         _appLogService.ConfigureDryRunSessionLogging(false, _dryRunLogsRootPath);
         _commentScannerService.StopAll();
@@ -711,6 +821,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         _watchCoordinator.ShutdownAll();
         _watchCoordinator.ChannelsChanged -= HandleChannelsChanged;
         _watchCoordinator.CodeDispatched -= HandleCodeDispatched;
+        _commentScannerService.ScannerCompleted -= HandleCommentScannerCompleted;
         _appLogService.EntryEmitted -= HandleLogEntryEmitted;
     }
 
@@ -776,6 +887,141 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         }
 
         StopBoost(detectedEvent.Channel, $"Boost ส่งโค้ดสำเร็จ {detectedEvent.Candidate.Value}");
+    }
+
+    private void CommentTimerSchedulerTimer_OnTick(object? sender, EventArgs e)
+    {
+        if (_settings.CommentTimers.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var active in _activeCommentTimerByChannel.ToList())
+        {
+            if (!_commentScannerService.IsRunning(active.Key))
+            {
+                _activeCommentTimerByChannel.Remove(active.Key);
+            }
+        }
+
+        var now = DateTime.Now;
+        var today = GetTodayKey();
+        foreach (var timer in _settings.CommentTimers.Where(static item => item.Enabled).ToList())
+        {
+            if (string.Equals(timer.LastTriggeredDate, today, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!TryGetTimerStart(timer, now.Date, out var start))
+            {
+                continue;
+            }
+
+            var duration = TimeSpan.FromSeconds(Math.Clamp(timer.DurationSeconds, 30, 3600));
+            if (now < start || now >= start + duration)
+            {
+                continue;
+            }
+
+            StartCommentTimer(timer, manualStart: false);
+        }
+    }
+
+    private bool StartCommentTimer(CommentTimerProfile timer, bool manualStart)
+    {
+        var channel = _settings.Channels.FirstOrDefault(item => item.Id == timer.ChannelId);
+        if (channel is null)
+        {
+            timer.LastStatus = "Channel not found";
+            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
+            _settingsStore.Save(_settings);
+            _appLogService.Write("[Comment Timer] channel not found");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(timer.VideoUrl))
+        {
+            timer.LastStatus = "Missing video URL";
+            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
+            _settingsStore.Save(_settings);
+            _appLogService.Write($"[{channel.Name}] Comment Timer skipped: missing video URL");
+            return false;
+        }
+
+        if (_commentScannerService.IsRunning(channel.Id))
+        {
+            timer.LastStatus = "Skipped, scanner already running";
+            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
+            _settingsStore.Save(_settings);
+            _appLogService.Write($"[{channel.Name}] Comment Timer skipped: scanner already running");
+            return false;
+        }
+
+        var durationSeconds = Math.Clamp(timer.DurationSeconds, 30, 3600);
+        var pollSeconds = Math.Clamp(timer.PollIntervalSeconds, 1, 60);
+        timer.DurationSeconds = durationSeconds;
+        timer.PollIntervalSeconds = pollSeconds;
+        timer.LastTriggeredDate = GetTodayKey();
+        timer.LastStatus = $"Running until {DateTime.Now.AddSeconds(durationSeconds):HH:mm:ss}";
+        _settings.CommentScannerLastVideoUrls[channel.Id] = timer.VideoUrl.Trim();
+        _settingsStore.Save(_settings);
+
+        _activeCommentTimerByChannel[channel.Id] = timer.Id;
+        var started = _commentScannerService.Start(
+            channel,
+            timer.VideoUrl,
+            TimeSpan.FromSeconds(pollSeconds),
+            RefreshChannelsOnUiThread,
+            new CommentScannerStartOptions
+            {
+                MaxDuration = TimeSpan.FromSeconds(durationSeconds),
+                StopOnFirstDispatchedCode = true,
+                SourceLabel = "Comment Timer"
+            });
+
+        if (!started)
+        {
+            _activeCommentTimerByChannel.Remove(channel.Id);
+            timer.LastStatus = "Start failed";
+            _settingsStore.Save(_settings);
+            return false;
+        }
+
+        _appLogService.Write($"[{channel.Name}] Comment Timer started: {pollSeconds}s polling for {durationSeconds / 60.0:0.#}m");
+        RefreshChannelsOnUiThread();
+        return true;
+    }
+
+    private void HandleCommentScannerCompleted(CommentScannerCompletedEvent completedEvent)
+    {
+        if (!System.Windows.Application.Current.Dispatcher.CheckAccess())
+        {
+            _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCommentScannerCompleted(completedEvent));
+            return;
+        }
+
+        if (!string.Equals(completedEvent.SourceLabel, "Comment Timer", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!_activeCommentTimerByChannel.TryGetValue(completedEvent.ChannelId, out var timerId))
+        {
+            return;
+        }
+
+        _activeCommentTimerByChannel.Remove(completedEvent.ChannelId);
+        var timer = _settings.CommentTimers.FirstOrDefault(item => item.Id == timerId);
+        if (timer is null)
+        {
+            return;
+        }
+
+        timer.LastStatus = completedEvent.DispatchedCodes.Count > 0
+            ? $"Sent {string.Join(", ", completedEvent.DispatchedCodes.Distinct(StringComparer.OrdinalIgnoreCase))}"
+            : NormalizeTimerStopReason(completedEvent.StopReason);
+        _settingsStore.Save(_settings);
     }
 
     private void HandleLogEntryEmitted(AppLogEntry entry)
@@ -1026,6 +1272,87 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         return $"Boosting {remainingSeconds}s";
     }
 
+    private static string GetTodayKey()
+    {
+        return DateOnly.FromDateTime(DateTime.Today).ToString(
+            "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryGetTimerStart(CommentTimerProfile timer, DateTime date, out DateTime start)
+    {
+        if (TimeOnly.TryParseExact(
+                timer.StartTime,
+                "HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var time) ||
+            TimeOnly.TryParse(timer.StartTime, out time))
+        {
+            start = date.Add(time.ToTimeSpan());
+            return true;
+        }
+
+        start = date;
+        return false;
+    }
+
+    private static string NormalizeTimerStartTime(string value)
+    {
+        if (TimeOnly.TryParseExact(
+                value,
+                "HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var exactTime) ||
+            TimeOnly.TryParse(value, out exactTime))
+        {
+            return exactTime.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return DateTime.Now.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string NormalizeTimerStopReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return "Stopped";
+        }
+
+        return reason.Contains("duration reached", StringComparison.OrdinalIgnoreCase)
+            ? "Timeout"
+            : reason;
+    }
+
+    private static CommentTimerProfile CloneCommentTimer(CommentTimerProfile source)
+    {
+        return new CommentTimerProfile
+        {
+            Id = source.Id,
+            ChannelId = source.ChannelId,
+            VideoUrl = source.VideoUrl,
+            StartTime = source.StartTime,
+            DurationSeconds = source.DurationSeconds,
+            PollIntervalSeconds = source.PollIntervalSeconds,
+            Enabled = source.Enabled,
+            LastTriggeredDate = source.LastTriggeredDate,
+            LastStatus = source.LastStatus
+        };
+    }
+
+    private static void ApplyCommentTimer(CommentTimerProfile source, CommentTimerProfile destination)
+    {
+        destination.ChannelId = source.ChannelId;
+        destination.VideoUrl = source.VideoUrl;
+        destination.StartTime = source.StartTime;
+        destination.DurationSeconds = source.DurationSeconds;
+        destination.PollIntervalSeconds = source.PollIntervalSeconds;
+        destination.Enabled = source.Enabled;
+        destination.LastTriggeredDate = source.LastTriggeredDate;
+        destination.LastStatus = source.LastStatus;
+    }
+
     private static ChannelProfile CloneChannel(ChannelProfile source)
     {
         return new ChannelProfile
@@ -1082,6 +1409,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard,
             BoostTimeoutSeconds = source.BoostTimeoutSeconds,
             CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls),
+            CommentTimers = source.CommentTimers.Select(CloneCommentTimer).ToList(),
             Channels = source.Channels.Select(CloneChannel).ToList()
         };
     }
@@ -1118,6 +1446,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard;
         destination.BoostTimeoutSeconds = source.BoostTimeoutSeconds;
         destination.CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls);
+        destination.CommentTimers = source.CommentTimers.Select(CloneCommentTimer).ToList();
         ApplyChannels(source.Channels, destination.Channels);
     }
 

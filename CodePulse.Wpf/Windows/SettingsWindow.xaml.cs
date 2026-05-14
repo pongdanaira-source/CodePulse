@@ -128,7 +128,24 @@ public partial class SettingsWindow : Window
         destination.OcrSpaceHourlyRequestGuard = source.OcrSpaceHourlyRequestGuard;
         destination.BoostTimeoutSeconds = source.BoostTimeoutSeconds;
         destination.CommentScannerLastVideoUrls = new Dictionary<Guid, string>(source.CommentScannerLastVideoUrls);
+        destination.CommentTimers = source.CommentTimers.Select(CloneCommentTimer).ToList();
         destination.Channels = source.Channels.Select(CloneChannel).ToList();
+    }
+
+    private static CommentTimerProfile CloneCommentTimer(CommentTimerProfile source)
+    {
+        return new CommentTimerProfile
+        {
+            Id = source.Id,
+            ChannelId = source.ChannelId,
+            VideoUrl = source.VideoUrl,
+            StartTime = source.StartTime,
+            DurationSeconds = source.DurationSeconds,
+            PollIntervalSeconds = source.PollIntervalSeconds,
+            Enabled = source.Enabled,
+            LastTriggeredDate = source.LastTriggeredDate,
+            LastStatus = source.LastStatus
+        };
     }
 
     private static ChannelProfile CloneChannel(ChannelProfile source)

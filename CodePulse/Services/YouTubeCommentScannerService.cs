@@ -26,6 +26,8 @@ public sealed class YouTubeCommentScannerService
     private readonly HashSet<string> _failedApiKeys = new(StringComparer.Ordinal);
     private readonly object _sync = new();
 
+    public event Action<CommentScannerCompletedEvent>? ScannerCompleted;
+
     public YouTubeCommentScannerService(
         AppSettings settings,
         AppLogService appLogService,
@@ -115,7 +117,12 @@ public sealed class YouTubeCommentScannerService
         return new YouTubeApiHealthCheckSummary(apiKeys.Count, usable, quotaExceeded, invalid + otherErrors);
     }
 
-    public bool Start(ChannelProfile channel, string videoUrlOrId, TimeSpan pollInterval, Action refreshChannels)
+    public bool Start(
+        ChannelProfile channel,
+        string videoUrlOrId,
+        TimeSpan pollInterval,
+        Action refreshChannels,
+        CommentScannerStartOptions? options = null)
     {
         if (GetUsableApiKeys().Count == 0)
         {
@@ -134,13 +141,27 @@ public sealed class YouTubeCommentScannerService
         var source = new CancellationTokenSource();
         var effectivePollInterval = pollInterval < MinimumPollInterval ? MinimumPollInterval : pollInterval;
         var isBurst = effectivePollInterval <= MinimumPollInterval;
-        var runtime = new CommentScannerRuntime(channel, videoId, effectivePollInterval, source, isBurst);
+        var runtime = new CommentScannerRuntime(
+            channel,
+            videoId,
+            effectivePollInterval,
+            source,
+            isBurst,
+            options ?? CommentScannerStartOptions.Default);
         lock (_sync)
         {
             _runningScanners[channel.Id] = runtime;
         }
 
         _appLogService.Write($"[{channel.Name}] เริ่มดักคอมเมนต์เจ้าของช่องทุก {effectivePollInterval.TotalSeconds:0} วิ: {videoId}");
+        if (!string.Equals(runtime.SourceLabel, "Comment Scanner", StringComparison.Ordinal))
+        {
+            var maxDurationText = runtime.MaxDuration is { } maxDuration
+                ? $"{maxDuration.TotalMinutes:0.#}m"
+                : "manual stop";
+            _appLogService.Write($"[{channel.Name}] {runtime.SourceLabel} active: timeout {maxDurationText}, stop on first code");
+        }
+
         if (isBurst)
         {
             _appLogService.Write($"[{channel.Name}] Comment Burst enabled: 1s polling, latest {BurstMaxResults} comments, 5m limit, {BurstMaxRequests} request guard");
@@ -201,10 +222,10 @@ public sealed class YouTubeCommentScannerService
             await PollWithRecoveryAsync(runtime, runtime.InitialMaxResults, runtime.CancellationTokenSource.Token);
 
             var stopReason = string.Empty;
-            while (!runtime.ShouldStopByBurstLimits(out stopReason))
+            while (!runtime.ShouldStopByLimits(out stopReason))
             {
                 await Task.Delay(runtime.NextPollDelay, runtime.CancellationTokenSource.Token);
-                if (runtime.ShouldStopByBurstLimits(out stopReason))
+                if (runtime.ShouldStopByLimits(out stopReason))
                 {
                     break;
                 }
@@ -214,15 +235,21 @@ public sealed class YouTubeCommentScannerService
 
             if (!string.IsNullOrWhiteSpace(stopReason))
             {
-                _appLogService.Write($"[{runtime.Channel.Name}] Comment Burst stopped: {stopReason}");
+                runtime.StopReason = stopReason;
+                var label = string.Equals(runtime.SourceLabel, "Comment Scanner", StringComparison.Ordinal)
+                    ? "Comment Burst"
+                    : runtime.SourceLabel;
+                _appLogService.Write($"[{runtime.Channel.Name}] {label} stopped: {stopReason}");
             }
         }
         catch (OperationCanceledException)
         {
             // Normal stop.
+            runtime.StopReason = "stopped";
         }
         catch (Exception ex)
         {
+            runtime.StopReason = $"failed: {Summarize(ex)}";
             _appLogService.Write($"[{runtime.Channel.Name}] Comment scanner ล้มเหลว: {Summarize(ex)}");
         }
         finally
@@ -237,6 +264,11 @@ public sealed class YouTubeCommentScannerService
             }
 
             refreshChannels();
+            ScannerCompleted?.Invoke(new CommentScannerCompletedEvent(
+                runtime.Channel.Id,
+                runtime.SourceLabel,
+                runtime.StopReason,
+                runtime.DispatchedCodes.ToArray()));
         }
     }
 
@@ -306,6 +338,16 @@ public sealed class YouTubeCommentScannerService
                 {
                     dispatchedCodes.Add(result.Code);
                 }
+            }
+        }
+
+        if (dispatchedCodes.Count > 0)
+        {
+            runtime.DispatchedCodes.AddRange(dispatchedCodes);
+            if (runtime.StopOnFirstDispatchedCode)
+            {
+                runtime.StopAfterCurrentPoll = true;
+                runtime.StopReason = $"new code dispatched {string.Join(", ", dispatchedCodes.Distinct(StringComparer.OrdinalIgnoreCase))}";
             }
         }
 
@@ -683,7 +725,8 @@ public sealed class YouTubeCommentScannerService
             string videoId,
             TimeSpan pollInterval,
             CancellationTokenSource cancellationTokenSource,
-            bool isBurst)
+            bool isBurst,
+            CommentScannerStartOptions options)
         {
             Channel = channel;
             VideoId = videoId;
@@ -692,6 +735,11 @@ public sealed class YouTubeCommentScannerService
             CancellationTokenSource = cancellationTokenSource;
             IsBurst = isBurst;
             StartedAt = DateTimeOffset.Now;
+            SourceLabel = string.IsNullOrWhiteSpace(options.SourceLabel)
+                ? "Comment Scanner"
+                : options.SourceLabel.Trim();
+            MaxDuration = options.MaxDuration;
+            StopOnFirstDispatchedCode = options.StopOnFirstDispatchedCode;
         }
 
         public ChannelProfile Channel { get; }
@@ -705,6 +753,18 @@ public sealed class YouTubeCommentScannerService
         public TimeSpan NextPollDelay { get; set; }
 
         public bool IsBurst { get; }
+
+        public string SourceLabel { get; }
+
+        public TimeSpan? MaxDuration { get; }
+
+        public bool StopOnFirstDispatchedCode { get; }
+
+        public bool StopAfterCurrentPoll { get; set; }
+
+        public string StopReason { get; set; } = string.Empty;
+
+        public List<string> DispatchedCodes { get; } = new();
 
         public DateTimeOffset StartedAt { get; }
 
@@ -733,7 +793,7 @@ public sealed class YouTubeCommentScannerService
                 return true;
             }
 
-            if (ApiRequestCount >= BurstMaxRequests)
+            if (IsBurst && ApiRequestCount >= BurstMaxRequests)
             {
                 stopReason = $"request guard reached {ApiRequestCount}/{BurstMaxRequests}";
                 return false;
@@ -743,17 +803,23 @@ public sealed class YouTubeCommentScannerService
             return true;
         }
 
-        public bool ShouldStopByBurstLimits(out string reason)
+        public bool ShouldStopByLimits(out string reason)
         {
             reason = string.Empty;
-            if (!IsBurst)
+
+            if (StopAfterCurrentPoll)
             {
-                return false;
+                reason = string.IsNullOrWhiteSpace(StopReason)
+                    ? "stop requested"
+                    : StopReason;
+                return true;
             }
 
-            if (DateTimeOffset.Now - StartedAt >= BurstMaxDuration)
+            var maxDuration = MaxDuration ?? (IsBurst ? BurstMaxDuration : null);
+
+            if (maxDuration is { } duration && DateTimeOffset.Now - StartedAt >= duration)
             {
-                reason = $"duration reached {BurstMaxDuration.TotalMinutes:0}m";
+                reason = $"duration reached {duration.TotalMinutes:0.#}m";
                 return true;
             }
 
@@ -809,3 +875,20 @@ public readonly record struct YouTubeApiHealthCheckSummary(
     int UsableKeys,
     int QuotaExceededKeys,
     int FailedKeys);
+
+public sealed class CommentScannerStartOptions
+{
+    public static CommentScannerStartOptions Default { get; } = new();
+
+    public TimeSpan? MaxDuration { get; init; }
+
+    public bool StopOnFirstDispatchedCode { get; init; }
+
+    public string SourceLabel { get; init; } = "Comment Scanner";
+}
+
+public sealed record CommentScannerCompletedEvent(
+    Guid ChannelId,
+    string SourceLabel,
+    string StopReason,
+    IReadOnlyList<string> DispatchedCodes);

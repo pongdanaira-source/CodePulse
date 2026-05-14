@@ -28,5 +28,7 @@ public sealed class AppSettings
 
     public Dictionary<Guid, string> CommentScannerLastVideoUrls { get; set; } = new();
 
+    public List<CommentTimerProfile> CommentTimers { get; set; } = new();
+
     public List<ChannelProfile> Channels { get; set; } = new();
 }

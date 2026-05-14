@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private QuickCaptureLauncherWindow? _quickCaptureLauncherWindow;
     private bool _quickCaptureLauncherRestoreMainWindowWhenClosed;
     private CommentScannerWindow? _commentScannerWindow;
+    private CommentTimerWindow? _commentTimerWindow;
     private ManualSendWindow? _manualSendWindow;
     private LogViewWindow? _logViewWindow;
     private readonly Dictionary<Guid, ScanRegionPreviewWindow> _scanRegionPreviewWindows = new();
@@ -380,6 +381,13 @@ public partial class MainWindow : Window
             _manualSendWindow = null;
         }
 
+        if (_commentTimerWindow is not null)
+        {
+            _commentTimerWindow.Closed -= CommentTimerWindow_OnClosed;
+            _commentTimerWindow.Close();
+            _commentTimerWindow = null;
+        }
+
         HideAllScanRegionPreviews();
         _viewModel.Shutdown();
         base.OnClosed(e);
@@ -467,6 +475,11 @@ public partial class MainWindow : Window
         ShowCommentScannerWindow();
     }
 
+    private void CommentTimerButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ShowCommentTimerWindow();
+    }
+
     private void ManualSendButton_OnClick(object sender, RoutedEventArgs e)
     {
         ShowManualSendWindow();
@@ -502,6 +515,46 @@ public partial class MainWindow : Window
         _commentScannerWindow.Closed += CommentScannerWindow_OnClosed;
         _commentScannerWindow.Show();
         _commentScannerWindow.Activate();
+    }
+
+    public void ShowCommentTimerWindow()
+    {
+        var channels = _viewModel.GetCommentTimerChannels();
+        if (channels.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "There are no enabled channels yet. Comment Timer needs a channel so it can use the right owner and prefix rules.",
+                "Comment timer",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (_commentTimerWindow is not null)
+        {
+            _commentTimerWindow.Activate();
+            return;
+        }
+
+        _commentTimerWindow = new CommentTimerWindow(
+            channels,
+            _viewModel.SelectedChannel,
+            _viewModel.GetCommentTimers,
+            _viewModel.SaveCommentTimer,
+            _viewModel.DeleteCommentTimer,
+            _viewModel.StartCommentTimerNow,
+            _viewModel.StopCommentTimer,
+            _viewModel.GetCommentTimerStatus);
+
+        if (IsVisible)
+        {
+            _commentTimerWindow.Owner = this;
+        }
+
+        _commentTimerWindow.Closed += CommentTimerWindow_OnClosed;
+        _commentTimerWindow.Show();
+        _commentTimerWindow.Activate();
     }
 
     public void ShowManualSendWindow()
@@ -879,6 +932,15 @@ public partial class MainWindow : Window
         {
             _commentScannerWindow.Closed -= CommentScannerWindow_OnClosed;
             _commentScannerWindow = null;
+        }
+    }
+
+    private void CommentTimerWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_commentTimerWindow is not null)
+        {
+            _commentTimerWindow.Closed -= CommentTimerWindow_OnClosed;
+            _commentTimerWindow = null;
         }
     }
 

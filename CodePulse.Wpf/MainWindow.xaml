@@ -182,6 +182,19 @@
                                 </StackPanel>
                             </Button>
                             <Button Margin="0,0,8,8"
+                                    Click="CommentTimerButton_OnClick">
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Margin="0,0,8,0"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="13"
+                                               VerticalAlignment="Center"
+                                               Text="&#xE916;" />
+                                    <TextBlock VerticalAlignment="Center"
+                                               Text="Timer" />
+                                </StackPanel>
+                            </Button>
+                            <Button Margin="0,0,8,8"
                                     Click="RefreshButton_OnClick">
                                 <StackPanel Orientation="Horizontal"
                                             VerticalAlignment="Center">
