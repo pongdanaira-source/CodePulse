@@ -259,7 +259,15 @@ public partial class CommentTimerWindow : Window
 
     private void UpdateEditorState()
     {
-        if (_isLoadingEditor)
+        if (_isLoadingEditor ||
+            VideoUrlTextBox is null ||
+            StartTimeTextBox is null ||
+            SaveButton is null ||
+            DeleteButton is null ||
+            StartNowButton is null ||
+            StopButton is null ||
+            StatusTextBlock is null ||
+            StatusHintTextBlock is null)
         {
             return;
         }
