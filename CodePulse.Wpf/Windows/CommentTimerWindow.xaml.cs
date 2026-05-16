@@ -19,6 +19,7 @@ public partial class CommentTimerWindow : Window
     private readonly DispatcherTimer _refreshTimer = new();
     private Guid? _editingTimerId;
     private bool _isLoadingEditor;
+    private bool _isUpdatingTimePicker;
 
     public CommentTimerWindow(
         IEnumerable<ChannelProfile> channels,
@@ -45,6 +46,12 @@ public partial class CommentTimerWindow : Window
         ChannelComboBox.ItemsSource = _channels;
         ChannelComboBox.SelectedItem = _channels.FirstOrDefault(channel => channel.Id == selectedChannel?.Id)
             ?? _channels.FirstOrDefault();
+        HourComboBox.ItemsSource = Enumerable.Range(0, 24)
+            .Select(static hour => hour.ToString("00", System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+        MinuteComboBox.ItemsSource = Enumerable.Range(0, 60)
+            .Select(static minute => minute.ToString("00", System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
 
         DurationComboBox.ItemsSource = new[]
         {
@@ -66,6 +73,7 @@ public partial class CommentTimerWindow : Window
 
         TimerListBox.ItemsSource = _rows;
         StartTimeTextBox.Text = DateTime.Now.AddMinutes(1).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        SyncTimePickerFromText();
 
         _refreshTimer.Interval = TimeSpan.FromSeconds(2);
         _refreshTimer.Tick += (_, _) => ReloadTimers(keepSelection: true);
@@ -99,6 +107,10 @@ public partial class CommentTimerWindow : Window
                 _getStatus(timer)));
         }
 
+        EmptyTimerListTextBlock.Visibility = _rows.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         if (selectedId is { } timerId)
         {
             TimerListBox.SelectedItem = _rows.FirstOrDefault(row => row.Timer.Id == timerId);
@@ -114,6 +126,7 @@ public partial class CommentTimerWindow : Window
         ChannelComboBox.SelectedItem = _channels.FirstOrDefault(channel => channel.Id == timer.ChannelId)
             ?? _channels.FirstOrDefault();
         StartTimeTextBox.Text = timer.StartTime;
+        SyncTimePickerFromText();
         DurationComboBox.SelectedValue = Math.Clamp(timer.DurationSeconds, 30, 3600);
         if (DurationComboBox.SelectedItem is null)
         {
@@ -132,16 +145,27 @@ public partial class CommentTimerWindow : Window
         UpdateEditorState();
     }
 
-    private void ClearEditor()
+    private void ClearEditor(bool preserveInput = false)
     {
+        var preservedChannel = SelectedChannel;
+        var preservedVideoUrl = VideoUrlTextBox.Text;
+        var preservedDuration = DurationComboBox.SelectedValue;
+        var preservedPollInterval = PollIntervalComboBox.SelectedValue;
+
         _isLoadingEditor = true;
         _editingTimerId = null;
         TimerListBox.SelectedItem = null;
+        if (preserveInput && preservedChannel is not null)
+        {
+            ChannelComboBox.SelectedItem = preservedChannel;
+        }
+
         StartTimeTextBox.Text = DateTime.Now.AddMinutes(1).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-        DurationComboBox.SelectedValue = 300;
-        PollIntervalComboBox.SelectedValue = 1;
+        SyncTimePickerFromText();
+        DurationComboBox.SelectedValue = preserveInput && preservedDuration is int duration ? duration : 300;
+        PollIntervalComboBox.SelectedValue = preserveInput && preservedPollInterval is int pollInterval ? pollInterval : 1;
         EnabledCheckBox.IsChecked = true;
-        VideoUrlTextBox.Text = string.Empty;
+        VideoUrlTextBox.Text = preserveInput ? preservedVideoUrl : string.Empty;
         _isLoadingEditor = false;
         UpdateEditorState();
     }
@@ -226,9 +250,9 @@ public partial class CommentTimerWindow : Window
 
     private void NewButton_OnClick(object sender, RoutedEventArgs e)
     {
-        ClearEditor();
+        ClearEditor(preserveInput: true);
         StatusTextBlock.Text = "New";
-        StatusHintTextBlock.Text = "Create a scheduled scan.";
+        StatusHintTextBlock.Text = "Create another scheduled scan for this link.";
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
@@ -254,7 +278,38 @@ public partial class CommentTimerWindow : Window
 
     private void Editor_OnTextChanged(object sender, TextChangedEventArgs e)
     {
+        SyncTimePickerFromText();
         UpdateEditorState();
+    }
+
+    private void TimePickerButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        SyncTimePickerFromText();
+        TimePickerPopup.IsOpen = true;
+    }
+
+    private void TimePickerComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingTimePicker ||
+            HourComboBox.SelectedItem is not string hour ||
+            MinuteComboBox.SelectedItem is not string minute)
+        {
+            return;
+        }
+
+        StartTimeTextBox.Text = $"{hour}:{minute}";
+        StartTimeTextBox.CaretIndex = StartTimeTextBox.Text.Length;
+        UpdateEditorState();
+    }
+
+    private void QuickTimeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var minutes = sender is Button { Tag: string tag } &&
+                      int.TryParse(tag, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : 0;
+        SetStartTime(DateTime.Now.AddMinutes(minutes));
+        TimePickerPopup.IsOpen = false;
     }
 
     private void UpdateEditorState()
@@ -276,6 +331,7 @@ public partial class CommentTimerWindow : Window
         var hasVideo = !string.IsNullOrWhiteSpace(VideoUrlTextBox.Text);
         var hasValidTime = !string.IsNullOrWhiteSpace(NormalizeStartTime(StartTimeTextBox.Text));
         SaveButton.IsEnabled = hasChannel && hasVideo && hasValidTime;
+        SaveButton.Content = _editingTimerId is null ? "Add" : "Save";
         DeleteButton.IsEnabled = SelectedRow is not null;
         StartNowButton.IsEnabled = SelectedRow is not null;
         StopButton.IsEnabled = SelectedRow is not null;
@@ -300,6 +356,26 @@ public partial class CommentTimerWindow : Window
 
     private static string NormalizeStartTime(string value)
     {
+        var trimmed = value.Trim();
+        var digits = new string(trimmed.Where(char.IsAsciiDigit).ToArray());
+        if (!trimmed.Contains(':', StringComparison.Ordinal) && digits.Length is >= 1 and <= 4)
+        {
+            var (hourText, minuteText) = digits.Length switch
+            {
+                <= 2 => (digits, "00"),
+                3 => (digits[..1], digits[1..]),
+                _ => (digits[..2], digits[2..])
+            };
+
+            if (int.TryParse(hourText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hour) &&
+                int.TryParse(minuteText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var minute) &&
+                hour is >= 0 and <= 23 &&
+                minute is >= 0 and <= 59)
+            {
+                return $"{hour:00}:{minute:00}";
+            }
+        }
+
         if (TimeOnly.TryParseExact(
                 value,
                 "HH:mm",
@@ -312,6 +388,33 @@ public partial class CommentTimerWindow : Window
         }
 
         return string.Empty;
+    }
+
+    private void SetStartTime(DateTime value)
+    {
+        StartTimeTextBox.Text = value.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        StartTimeTextBox.CaretIndex = StartTimeTextBox.Text.Length;
+        SyncTimePickerFromText();
+        UpdateEditorState();
+    }
+
+    private void SyncTimePickerFromText()
+    {
+        if (HourComboBox is null || MinuteComboBox is null)
+        {
+            return;
+        }
+
+        var normalized = NormalizeStartTime(StartTimeTextBox.Text);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return;
+        }
+
+        _isUpdatingTimePicker = true;
+        HourComboBox.SelectedItem = normalized[..2];
+        MinuteComboBox.SelectedItem = normalized[3..5];
+        _isUpdatingTimePicker = false;
     }
 
     public sealed record TimeOption(string Label, int Seconds);

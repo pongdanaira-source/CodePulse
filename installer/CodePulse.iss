@@ -1,5 +1,5 @@
 #define MyAppName "CodePulse"
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.0.10"
 #define MyAppPublisher "CodePulse"
 #define MyAppExeName "CodePulse.Wpf.exe"
 #define RepoRoot ".."

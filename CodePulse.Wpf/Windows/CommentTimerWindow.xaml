@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Comment Timer"
         Icon="/Assets/app-icon.ico"
-        Width="820"
-        MinWidth="760"
+        Width="900"
+        MinWidth="820"
         Height="680"
         MinHeight="620"
         WindowStartupLocation="CenterOwner"
@@ -86,15 +86,13 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.35*" />
+                        <ColumnDefinition Width="1.2*" MinWidth="220" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="0.7*" />
+                        <ColumnDefinition Width="184" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition Width="150" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="0.75*" />
-                        <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="140" />
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Row="0"
@@ -114,12 +112,77 @@
                         <TextBlock Foreground="{StaticResource MutedBrush}"
                                    FontSize="11"
                                    Text="Start" />
-                        <TextBox x:Name="StartTimeTextBox"
-                                 Margin="0,7,0,0"
-                                 MinHeight="38"
-                                 Padding="10,7"
-                                 VerticalContentAlignment="Center"
-                                 TextChanged="Editor_OnTextChanged" />
+                        <Grid Margin="0,7,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="StartTimeTextBox"
+                                     Grid.Column="0"
+                                     MinHeight="38"
+                                     Padding="10,7"
+                                     VerticalContentAlignment="Center"
+                                     TextChanged="Editor_OnTextChanged" />
+                            <Button Grid.Column="2"
+                                    Width="54"
+                                    Padding="8,7"
+                                    Click="TimePickerButton_OnClick"
+                                    Content="Pick" />
+                            <Popup x:Name="TimePickerPopup"
+                                   PlacementTarget="{Binding ElementName=StartTimeTextBox}"
+                                   Placement="Bottom"
+                                   StaysOpen="False"
+                                   AllowsTransparency="True">
+                                <Border Padding="10"
+                                        Background="{StaticResource SurfaceBrush}"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="78" />
+                                                <ColumnDefinition Width="18" />
+                                                <ColumnDefinition Width="78" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="HourComboBox"
+                                                      Grid.Column="0"
+                                                      MinHeight="36"
+                                                      SelectionChanged="TimePickerComboBox_OnSelectionChanged" />
+                                            <TextBlock Grid.Column="1"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Text=":" />
+                                            <ComboBox x:Name="MinuteComboBox"
+                                                      Grid.Column="2"
+                                                      MinHeight="36"
+                                                      SelectionChanged="TimePickerComboBox_OnSelectionChanged" />
+                                        </Grid>
+                                        <UniformGrid Margin="0,8,0,0"
+                                                     Columns="3">
+                                            <Button Margin="0,0,4,0"
+                                                    Padding="8,6"
+                                                    Tag="0"
+                                                    Click="QuickTimeButton_OnClick"
+                                                    Content="Now" />
+                                            <Button Margin="4,0"
+                                                    Padding="8,6"
+                                                    Tag="5"
+                                                    Click="QuickTimeButton_OnClick"
+                                                    Content="+5" />
+                                            <Button Margin="4,0,0,0"
+                                                    Padding="8,6"
+                                                    Tag="10"
+                                                    Click="QuickTimeButton_OnClick"
+                                                    Content="+10" />
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
                     </StackPanel>
 
                     <StackPanel Grid.Row="0"
@@ -148,19 +211,9 @@
                                   SelectionChanged="Editor_OnChanged" />
                     </StackPanel>
 
-                    <CheckBox x:Name="EnabledCheckBox"
-                              Grid.Row="0"
-                              Grid.Column="8"
-                              Margin="0,24,0,0"
-                              VerticalAlignment="Top"
-                              Content="Enabled"
-                              IsChecked="True"
-                              Checked="Editor_OnChanged"
-                              Unchecked="Editor_OnChanged" />
-
                     <StackPanel Grid.Row="2"
                                 Grid.Column="0"
-                                Grid.ColumnSpan="9">
+                                Grid.ColumnSpan="7">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -170,16 +223,26 @@
                                        Foreground="{StaticResource MutedBrush}"
                                        FontSize="11"
                                        Text="Video URL or ID" />
-                            <Border Grid.Column="1"
-                                    Padding="8,3"
-                                    Background="#182D3940"
-                                    BorderBrush="#3046525A"
-                                    BorderThickness="1"
-                                    CornerRadius="8">
-                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
-                                           FontSize="11"
-                                           Text="stop on first new code" />
-                            </Border>
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                <Border Padding="8,3"
+                                        Background="#182D3940"
+                                        BorderBrush="#3046525A"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="11"
+                                               Text="stop on first new code" />
+                                </Border>
+                                <CheckBox x:Name="EnabledCheckBox"
+                                          Margin="14,0,0,0"
+                                          VerticalAlignment="Center"
+                                          Content="Enabled"
+                                          IsChecked="True"
+                                          Checked="Editor_OnChanged"
+                                          Unchecked="Editor_OnChanged" />
+                            </StackPanel>
                         </Grid>
                         <TextBox x:Name="VideoUrlTextBox"
                                  Margin="0,7,0,0"
@@ -198,70 +261,79 @@
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12">
-                <ListBox x:Name="TimerListBox"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         HorizontalContentAlignment="Stretch"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         SelectionChanged="TimerListBox_OnSelectionChanged">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            <Setter Property="Padding" Value="0" />
-                            <Setter Property="Margin" Value="0" />
-                            <Setter Property="Background" Value="Transparent" />
-                            <Setter Property="BorderThickness" Value="0" />
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border Margin="0,0,0,8"
-                                    Padding="12"
-                                    Background="{StaticResource SurfaceBrush}"
-                                    BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="10">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="1.15*" />
-                                        <ColumnDefinition Width="0.7*" />
-                                        <ColumnDefinition Width="0.65*" />
-                                        <ColumnDefinition Width="0.65*" />
-                                        <ColumnDefinition Width="0.75*" />
-                                        <ColumnDefinition Width="1.2*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0"
-                                               FontSize="13"
-                                               FontWeight="SemiBold"
-                                               Text="{Binding ChannelName}"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="1"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="12"
-                                               Text="{Binding StartTime}" />
-                                    <TextBlock Grid.Column="2"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="12"
-                                               Text="{Binding DurationText}" />
-                                    <TextBlock Grid.Column="3"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="12"
-                                               Text="{Binding PollText}" />
-                                    <TextBlock Grid.Column="4"
-                                               Foreground="{StaticResource AccentBrush}"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               Text="{Binding EnabledText}" />
-                                    <TextBlock Grid.Column="5"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="12"
-                                               Text="{Binding Status}"
-                                               TextTrimming="CharacterEllipsis" />
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <Grid>
+                    <ListBox x:Name="TimerListBox"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             SelectionChanged="TimerListBox_OnSelectionChanged">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="0" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,8"
+                                        Padding="12"
+                                        Background="{StaticResource SurfaceBrush}"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.15*" />
+                                            <ColumnDefinition Width="0.7*" />
+                                            <ColumnDefinition Width="0.65*" />
+                                            <ColumnDefinition Width="0.65*" />
+                                            <ColumnDefinition Width="0.75*" />
+                                            <ColumnDefinition Width="1.2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding ChannelName}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   FontSize="12"
+                                                   Text="{Binding StartTime}" />
+                                        <TextBlock Grid.Column="2"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   FontSize="12"
+                                                   Text="{Binding DurationText}" />
+                                        <TextBlock Grid.Column="3"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   FontSize="12"
+                                                   Text="{Binding PollText}" />
+                                        <TextBlock Grid.Column="4"
+                                                   Foreground="{StaticResource AccentBrush}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding EnabledText}" />
+                                        <TextBlock Grid.Column="5"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   FontSize="12"
+                                                   Text="{Binding Status}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="EmptyTimerListTextBlock"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedBrush}"
+                               FontSize="14"
+                               Text="No timers yet"
+                               Visibility="Collapsed" />
+                </Grid>
             </Border>
 
             <Border Grid.Row="6"
@@ -291,14 +363,14 @@
                                VerticalAlignment="Center"
                                Foreground="{StaticResource TextSecondaryBrush}"
                                FontSize="12"
-                               Text="One channel can have multiple scheduled timers."
+                               Text="Multiple times per channel."
                                TextWrapping="Wrap" />
 
                     <Button Grid.Column="1"
-                            Width="86"
+                            Width="98"
                             Padding="12,9"
                             Click="NewButton_OnClick"
-                            Content="New" />
+                            Content="New time" />
                     <Button Grid.Column="3"
                             x:Name="DeleteButton"
                             Width="86"
