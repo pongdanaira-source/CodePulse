@@ -55,24 +55,26 @@ public sealed class YouTubeCommentScannerService
         if (apiKeys.Count == 0)
         {
             _appLogService.Write("[Comment Scanner] YouTube API health check skipped: no API keys configured");
-            return new YouTubeApiHealthCheckSummary(0, 0, 0, 0);
+            return new YouTubeApiHealthCheckSummary(0, 0, 0, 0, 0);
         }
 
+        var checkedKeys = 0;
         var usable = 0;
         var quotaExceeded = 0;
         var invalid = 0;
         var otherErrors = 0;
-        _appLogService.Write($"[Comment Scanner] YouTube API daily health check started for {apiKeys.Count} key(s)");
+        _appLogService.Write($"[Comment Scanner] YouTube API daily health check started for {apiKeys.Count} key(s), stops after first usable key");
 
         for (var index = 0; index < apiKeys.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            checkedKeys++;
             var apiKey = apiKeys[index];
             if (!_apiUsageTracker.TryReserveYouTubeUnits(1, GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count), out var usage))
             {
                 otherErrors++;
                 _appLogService.Write($"[Comment Scanner] Key {index + 1}: skipped by local quota guard ({usage.YouTubeDailyUnits}/{GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count)})");
-                continue;
+                break;
             }
 
             try
@@ -82,8 +84,8 @@ public sealed class YouTubeCommentScannerService
                 if (response.IsSuccessStatusCode)
                 {
                     usable++;
-                    _appLogService.Write($"[Comment Scanner] Key {index + 1}: usable");
-                    continue;
+                    _appLogService.Write($"[Comment Scanner] Key {index + 1}: usable, stopping health check");
+                    break;
                 }
 
                 if (IsQuotaFailure(content))
@@ -112,9 +114,9 @@ public sealed class YouTubeCommentScannerService
             }
         }
 
-        var effectiveGuard = GetEffectiveYouTubeDailyQuotaGuard(Math.Max(usable, 1));
-        _appLogService.Write($"[Comment Scanner] YouTube API health check summary: usable {usable}/{apiKeys.Count}, quota exceeded {quotaExceeded}, invalid {invalid}, errors {otherErrors}, estimated local guard {effectiveGuard} units/day");
-        return new YouTubeApiHealthCheckSummary(apiKeys.Count, usable, quotaExceeded, invalid + otherErrors);
+        var effectiveGuard = GetEffectiveYouTubeDailyQuotaGuard(apiKeys.Count);
+        _appLogService.Write($"[Comment Scanner] YouTube API health check summary: checked {checkedKeys}/{apiKeys.Count}, usable {usable}, quota exceeded {quotaExceeded}, invalid {invalid}, errors {otherErrors}, estimated local guard {effectiveGuard} units/day");
+        return new YouTubeApiHealthCheckSummary(apiKeys.Count, checkedKeys, usable, quotaExceeded, invalid + otherErrors);
     }
 
     public bool Start(
@@ -872,6 +874,7 @@ public sealed class YouTubeCommentScannerService
 
 public readonly record struct YouTubeApiHealthCheckSummary(
     int TotalKeys,
+    int CheckedKeys,
     int UsableKeys,
     int QuotaExceededKeys,
     int FailedKeys);

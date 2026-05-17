@@ -453,7 +453,7 @@ public partial class SettingsWindow : Window
         {
             var summary = await _checkYouTubeApiKeysAsync();
             YouTubeHealthTextBlock.Text =
-                $"Health check: usable {summary.UsableKeys}/{summary.TotalKeys}, quota exceeded {summary.QuotaExceededKeys}, failed {summary.FailedKeys}.";
+                $"Health check: checked {summary.CheckedKeys}/{summary.TotalKeys}, usable {summary.UsableKeys}, quota exceeded {summary.QuotaExceededKeys}, failed {summary.FailedKeys}.";
             RefreshApiUsageText();
         }
         catch (Exception ex)
