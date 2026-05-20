@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using CodePulse.Models;
 
@@ -77,7 +78,11 @@ public partial class CommentTimerWindow : Window
 
         _refreshTimer.Interval = TimeSpan.FromSeconds(2);
         _refreshTimer.Tick += (_, _) => ReloadTimers(keepSelection: true);
-        Loaded += (_, _) => _refreshTimer.Start();
+        Loaded += (_, _) =>
+        {
+            _refreshTimer.Start();
+            VideoUrlTextBox.Focus();
+        };
         Closed += (_, _) => _refreshTimer.Stop();
 
         ReloadTimers(keepSelection: false);
@@ -185,6 +190,7 @@ public partial class CommentTimerWindow : Window
             return;
         }
 
+        var isAdding = _editingTimerId is null;
         var existing = SelectedRow?.Timer;
         var timer = new CommentTimerProfile
         {
@@ -200,6 +206,19 @@ public partial class CommentTimerWindow : Window
         };
 
         _saveTimer(timer);
+        if (isAdding)
+        {
+            _editingTimerId = null;
+            ReloadTimers(keepSelection: false);
+            StartTimeTextBox.Text = startTime;
+            SyncTimePickerFromText();
+            StatusTextBlock.Text = "Added";
+            StatusHintTextBlock.Text = "Change time and press Enter to add another.";
+            StartTimeTextBox.Focus();
+            StartTimeTextBox.SelectAll();
+            return;
+        }
+
         _editingTimerId = timer.Id;
         ReloadTimers(keepSelection: true);
         StatusTextBlock.Text = "Saved";
@@ -218,6 +237,38 @@ public partial class CommentTimerWindow : Window
         ReloadTimers(keepSelection: false);
         StatusTextBlock.Text = "Deleted";
         StatusHintTextBlock.Text = "Timer removed.";
+    }
+
+    private void DeleteAllButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var timerIds = _getTimers()
+            .Select(static timer => timer.Id)
+            .ToList();
+        if (timerIds.Count == 0)
+        {
+            return;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            $"Delete all {timerIds.Count} comment timers?",
+            "Delete all timers",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        foreach (var timerId in timerIds)
+        {
+            _deleteTimer(timerId);
+        }
+
+        ClearEditor(preserveInput: true);
+        ReloadTimers(keepSelection: false);
+        StatusTextBlock.Text = "Deleted";
+        StatusHintTextBlock.Text = $"Deleted {timerIds.Count} timer(s).";
     }
 
     private void StartNowButton_OnClick(object sender, RoutedEventArgs e)
@@ -258,6 +309,65 @@ public partial class CommentTimerWindow : Window
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void Window_OnKeyDown(object sender, KeyEventArgs e)
+    {
+        if (TimePickerPopup.IsOpen)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        if (e.Key == Key.S)
+        {
+            TrySaveFromKeyboard();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.N)
+        {
+            ClearEditor(preserveInput: true);
+            StatusTextBlock.Text = "New";
+            StatusHintTextBlock.Text = "Create another scheduled scan for this link.";
+            StartTimeTextBox.Focus();
+            StartTimeTextBox.SelectAll();
+            e.Handled = true;
+        }
+    }
+
+    private void EditorTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        TrySaveFromKeyboard();
+        e.Handled = true;
+    }
+
+    private void TrySaveFromKeyboard()
+    {
+        if (!SaveButton.IsEnabled)
+        {
+            UpdateEditorState();
+            return;
+        }
+
+        SaveButton_OnClick(SaveButton, new RoutedEventArgs());
     }
 
     private void TimerListBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -308,7 +418,9 @@ public partial class CommentTimerWindow : Window
                       int.TryParse(tag, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var value)
             ? value
             : 0;
-        SetStartTime(DateTime.Now.AddMinutes(minutes));
+        SetStartTime(minutes == 0
+            ? DateTime.Now
+            : GetStartTimeBase().AddMinutes(minutes));
         TimePickerPopup.IsOpen = false;
     }
 
@@ -319,6 +431,7 @@ public partial class CommentTimerWindow : Window
             StartTimeTextBox is null ||
             SaveButton is null ||
             DeleteButton is null ||
+            DeleteAllButton is null ||
             StartNowButton is null ||
             StopButton is null ||
             StatusTextBlock is null ||
@@ -333,6 +446,7 @@ public partial class CommentTimerWindow : Window
         SaveButton.IsEnabled = hasChannel && hasVideo && hasValidTime;
         SaveButton.Content = _editingTimerId is null ? "Add" : "Save";
         DeleteButton.IsEnabled = SelectedRow is not null;
+        DeleteAllButton.IsEnabled = _rows.Count > 0;
         StartNowButton.IsEnabled = SelectedRow is not null;
         StopButton.IsEnabled = SelectedRow is not null;
 
@@ -357,6 +471,17 @@ public partial class CommentTimerWindow : Window
     private static string NormalizeStartTime(string value)
     {
         var trimmed = value.Trim();
+        if (trimmed.Equals("now", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("n", StringComparison.OrdinalIgnoreCase))
+        {
+            return DateTime.Now.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (TryParseRelativeMinutes(trimmed, out var relativeMinutes))
+        {
+            return DateTime.Now.AddMinutes(relativeMinutes).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         var digits = new string(trimmed.Where(char.IsAsciiDigit).ToArray());
         if (!trimmed.Contains(':', StringComparison.Ordinal) && digits.Length is >= 1 and <= 4)
         {
@@ -390,12 +515,55 @@ public partial class CommentTimerWindow : Window
         return string.Empty;
     }
 
+    private static bool TryParseRelativeMinutes(string value, out int minutes)
+    {
+        minutes = 0;
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith("+", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[1..].Trim();
+        }
+        else if (trimmed.StartsWith("now+", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[4..].Trim();
+        }
+        else
+        {
+            return false;
+        }
+
+        trimmed = trimmed.TrimEnd('m', 'M');
+        return int.TryParse(
+                   trimmed,
+                   System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   out minutes) &&
+               minutes is >= 0 and <= 240;
+    }
+
     private void SetStartTime(DateTime value)
     {
         StartTimeTextBox.Text = value.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         StartTimeTextBox.CaretIndex = StartTimeTextBox.Text.Length;
         SyncTimePickerFromText();
         UpdateEditorState();
+    }
+
+    private DateTime GetStartTimeBase()
+    {
+        var normalized = NormalizeStartTime(StartTimeTextBox.Text);
+        if (string.IsNullOrWhiteSpace(normalized) ||
+            !TimeOnly.TryParseExact(
+                normalized,
+                "HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var time))
+        {
+            return DateTime.Now;
+        }
+
+        return DateTime.Today.Add(time.ToTimeSpan());
     }
 
     private void SyncTimePickerFromText()

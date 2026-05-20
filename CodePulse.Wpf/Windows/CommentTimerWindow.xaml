@@ -8,7 +8,8 @@
         Height="680"
         MinHeight="620"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource AppBackgroundBrush}">
+        Background="{StaticResource AppBackgroundBrush}"
+        KeyDown="Window_OnKeyDown">
     <Border Margin="14"
             Padding="0"
             Background="{StaticResource SurfaceBrush}"
@@ -88,11 +89,11 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.2*" MinWidth="220" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="184" />
+                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="128" />
                         <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="140" />
+                        <ColumnDefinition Width="112" />
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Row="0"
@@ -123,6 +124,8 @@
                                      MinHeight="38"
                                      Padding="10,7"
                                      VerticalContentAlignment="Center"
+                                     ToolTip="HH:mm, 1455, +5, or now"
+                                     PreviewKeyDown="EditorTextBox_OnPreviewKeyDown"
                                      TextChanged="Editor_OnTextChanged" />
                             <Button Grid.Column="2"
                                     Width="54"
@@ -183,6 +186,41 @@
                                 </Border>
                             </Popup>
                         </Grid>
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Margin="0,0,6,0"
+                                    Padding="8,4"
+                                    MinWidth="42"
+                                    Tag="0"
+                                    Click="QuickTimeButton_OnClick"
+                                    Content="Now" />
+                            <Button Margin="0,0,6,0"
+                                    Padding="8,4"
+                                    MinWidth="38"
+                                    Tag="1"
+                                    Click="QuickTimeButton_OnClick"
+                                    Content="+1" />
+                            <Button Margin="0,0,6,0"
+                                    Padding="8,4"
+                                    MinWidth="38"
+                                    Tag="3"
+                                    Click="QuickTimeButton_OnClick"
+                                    Content="+3" />
+                            <Button Margin="0,0,6,0"
+                                    Padding="8,4"
+                                    MinWidth="38"
+                                    Tag="5"
+                                    Click="QuickTimeButton_OnClick"
+                                    Content="+5" />
+                            <Button Padding="8,4"
+                                    MinWidth="42"
+                                    Tag="10"
+                                    Click="QuickTimeButton_OnClick"
+                                    Content="+10" />
+                        </WrapPanel>
+                        <TextBlock Margin="0,6,0,0"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="10"
+                                   Text="HH:mm, 1455, +5, now" />
                     </StackPanel>
 
                     <StackPanel Grid.Row="0"
@@ -249,6 +287,8 @@
                                  MinHeight="40"
                                  Padding="12,8"
                                  VerticalContentAlignment="Center"
+                                 ToolTip="Paste URL or video id, then press Enter"
+                                 PreviewKeyDown="EditorTextBox_OnPreviewKeyDown"
                                  TextChanged="Editor_OnTextChanged" />
                     </StackPanel>
                 </Grid>
@@ -357,6 +397,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="8" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0"
@@ -378,23 +420,29 @@
                             Click="DeleteButton_OnClick"
                             Content="Delete" />
                     <Button Grid.Column="5"
+                            x:Name="DeleteAllButton"
+                            Width="92"
+                            Padding="12,9"
+                            Click="DeleteAllButton_OnClick"
+                            Content="Delete all" />
+                    <Button Grid.Column="7"
                             x:Name="StartNowButton"
                             Width="96"
                             Padding="12,9"
                             Click="StartNowButton_OnClick"
                             Content="Start now" />
-                    <Button Grid.Column="7"
+                    <Button Grid.Column="9"
                             x:Name="StopButton"
                             Width="86"
                             Padding="12,9"
                             Click="StopButton_OnClick"
                             Content="Stop" />
-                    <Button Grid.Column="9"
+                    <Button Grid.Column="11"
                             Width="86"
                             Padding="12,9"
                             Click="CloseButton_OnClick"
                             Content="Close" />
-                    <Button Grid.Column="11"
+                    <Button Grid.Column="13"
                             x:Name="SaveButton"
                             Width="96"
                             Padding="12,9"
