@@ -6,6 +6,8 @@ namespace CodePulse.Dispatchers;
 
 public sealed class LineDispatcher
 {
+    private const int MaxLinePasteDelayMs = 120;
+
     private readonly AppSettings _settings;
     private readonly LineTargetWindowService _lineTargetWindowService;
 
@@ -34,23 +36,25 @@ public sealed class LineDispatcher
 
         return DesktopAutomationHelper.DispatchToHandleAsync(
             detectedEvent.Candidate.Value,
-            _settings.Dispatch.PasteDelayMs,
+            GetLinePasteDelayMs(),
             _settings.Dispatch.EnterAfterPaste,
             selectedWindow,
             cancellationToken,
             focusPoints:
             [
-                new PointF(0.50f, 0.915f),
-                new PointF(0.62f, 0.930f),
-                new PointF(0.42f, 0.930f),
+                new PointF(0.50f, 0.930f),
                 new PointF(0.50f, 0.940f)
             ],
-            typeFallback: true,
-            moveCursorToBottomOnComplete: true,
-            completionCursorPoint: new PointF(0.92f, 0.985f),
+            typeFallback: false,
+            moveCursorToBottomOnComplete: false,
             minimizeWindowOnComplete: true,
             dryRun: _settings.Dispatch.EnableDryRun,
             safePaste: _settings.Dispatch.EnableSafeDesktopPaste,
             sendEscapeBeforePaste: false);
+    }
+
+    private int GetLinePasteDelayMs()
+    {
+        return Math.Clamp(_settings.Dispatch.PasteDelayMs, 50, MaxLinePasteDelayMs);
     }
 }
