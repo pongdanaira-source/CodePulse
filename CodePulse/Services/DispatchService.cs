@@ -77,19 +77,16 @@ public sealed class DispatchService
         CancellationToken cancellationToken,
         bool includeSound)
     {
-        if (includeSound && !_settings.Dispatch.EnableDryRun)
-        {
-            if (_settings.Dispatch.EnableSound)
-            {
-                _ = RunSoundInBackgroundAsync(cancellationToken);
-            }
-        }
-
         var pendingTasks = new List<Task<bool>>
         {
             DispatchTelegramAsync(detectedEvent, cancellationToken),
             DispatchDesktopAsync(detectedEvent, cancellationToken)
         };
+
+        if (includeSound && !_settings.Dispatch.EnableDryRun && _settings.Dispatch.EnableSound)
+        {
+            _ = Task.Run(() => RunSoundInBackgroundAsync(cancellationToken), CancellationToken.None);
+        }
 
         var results = await Task.WhenAll(pendingTasks);
         return results.Any(static success => success);
