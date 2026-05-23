@@ -103,9 +103,10 @@ public sealed class WatchCoordinator
         string code,
         string sourceMessage,
         string? capturedImagePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reason = "ocr-selected")
     {
-        return await _channelWatcher.ProcessExternalDetectedCodeAsync(channel, code, sourceMessage, capturedImagePath, cancellationToken);
+        return await _channelWatcher.ProcessExternalDetectedCodeAsync(channel, code, sourceMessage, capturedImagePath, cancellationToken, reason);
     }
 
     public void StopChannel(ChannelProfile channel)

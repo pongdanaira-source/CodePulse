@@ -67,9 +67,10 @@ public sealed class CodeExtractorService
     public CodeCandidate? ExtractBestCandidate(
         ChannelProfile channel,
         string message,
-        bool normalizeThaiCodeAliases = true)
+        bool normalizeThaiCodeAliases = true,
+        bool includeGenericAmbiguousVariants = true)
     {
-        return ExtractCandidates(channel, message, normalizeThaiCodeAliases)
+        return ExtractCandidates(channel, message, normalizeThaiCodeAliases, includeGenericAmbiguousVariants)
             .OrderByDescending(static candidate => candidate.Score)
             .FirstOrDefault();
     }
@@ -77,7 +78,8 @@ public sealed class CodeExtractorService
     public IReadOnlyList<CodeCandidate> ExtractCandidates(
         ChannelProfile channel,
         string message,
-        bool normalizeThaiCodeAliases = true)
+        bool normalizeThaiCodeAliases = true,
+        bool includeGenericAmbiguousVariants = true)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
@@ -108,7 +110,7 @@ public sealed class CodeExtractorService
         }
 
         var candidates = new List<(int Index, CodeCandidate Candidate)>();
-        foreach (var tokenMatch in ExtractTokenMatches(text, message, prefixes, prefixOnly))
+        foreach (var tokenMatch in ExtractTokenMatches(text, message, prefixes, prefixOnly, includeGenericAmbiguousVariants))
         {
             candidates.Add(tokenMatch);
         }
@@ -136,7 +138,7 @@ public sealed class CodeExtractorService
                     continue;
                 }
 
-                foreach (var candidate in CreateGenericCandidates(match.Value, message))
+                foreach (var candidate in CreateGenericCandidates(match.Value, message, includeGenericAmbiguousVariants))
                 {
                     candidates.Add((match.Index, candidate));
                 }
@@ -151,11 +153,70 @@ public sealed class CodeExtractorService
             .ToList();
     }
 
+    public IReadOnlyList<RuleRejectedCodeCandidate> ExtractRuleRejectedCandidates(
+        ChannelProfile channel,
+        string message,
+        int maxCandidates = 5)
+    {
+        if (string.IsNullOrWhiteSpace(message) || maxCandidates <= 0)
+        {
+            return [];
+        }
+
+        var text = message.Trim().ToUpperInvariant();
+        var explicitPrefixes = PrefixRule.ParseMany(channel.Prefixes)
+            .OrderByDescending(static prefix => prefix.Prefix.Length)
+            .ThenByDescending(static prefix => prefix.SuffixLength)
+            .ToList();
+        var acceptedValues = ExtractCandidates(
+                channel,
+                message,
+                normalizeThaiCodeAliases: false,
+                includeGenericAmbiguousVariants: false)
+            .Select(static candidate => candidate.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rejected = new List<RuleRejectedCodeCandidate>();
+
+        foreach (Match tokenMatch in Regex.Matches(text, @"[A-Z0-9]{8,32}", RegexOptions.CultureInvariant))
+        {
+            if (!tokenMatch.Success)
+            {
+                continue;
+            }
+
+            var token = tokenMatch.Value;
+            if (acceptedValues.Contains(token))
+            {
+                continue;
+            }
+
+            var rejection = TryDescribeRuleRejection(channel, token, explicitPrefixes);
+            if (rejection is null)
+            {
+                continue;
+            }
+
+            if (rejected.Any(item => item.Value.Equals(token, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            rejected.Add(new RuleRejectedCodeCandidate(token, rejection));
+            if (rejected.Count >= maxCandidates)
+            {
+                break;
+            }
+        }
+
+        return rejected;
+    }
+
     private static IEnumerable<(int Index, CodeCandidate Candidate)> ExtractTokenMatches(
         string text,
         string sourceMessage,
         IReadOnlyList<PrefixRule> prefixes,
-        bool prefixOnly)
+        bool prefixOnly,
+        bool includeGenericAmbiguousVariants)
     {
         foreach (Match tokenMatch in Regex.Matches(text, @"[A-Z0-9]+", RegexOptions.CultureInvariant))
         {
@@ -200,14 +261,14 @@ public sealed class CodeExtractorService
                     continue;
                 }
 
-                foreach (var candidate in CreateGenericCandidates(token, sourceMessage))
+                foreach (var candidate in CreateGenericCandidates(token, sourceMessage, includeGenericAmbiguousVariants))
                 {
                     yield return (tokenMatch.Index, candidate);
                 }
             }
             else if (token.Length > GenericCodeLength)
             {
-                foreach (var candidate in ExtractJoinedGenericMatches(token, tokenMatch.Index, sourceMessage, prefixes))
+                foreach (var candidate in ExtractJoinedGenericMatches(token, tokenMatch.Index, sourceMessage, prefixes, includeGenericAmbiguousVariants))
                 {
                     yield return candidate;
                 }
@@ -291,7 +352,8 @@ public sealed class CodeExtractorService
         string token,
         int tokenStartIndex,
         string sourceMessage,
-        IReadOnlyList<PrefixRule> prefixes)
+        IReadOnlyList<PrefixRule> prefixes,
+        bool includeGenericAmbiguousVariants)
     {
         var occupied = new bool[token.Length];
         foreach (var span in FindPrefixSpans(token, prefixes))
@@ -334,7 +396,7 @@ public sealed class CodeExtractorService
                         continue;
                     }
 
-                    foreach (var candidate in CreateGenericCandidates(value, sourceMessage))
+                    foreach (var candidate in CreateGenericCandidates(value, sourceMessage, includeGenericAmbiguousVariants))
                     {
                         yield return (tokenStartIndex + segmentStart + offset, candidate);
                     }
@@ -410,7 +472,56 @@ public sealed class CodeExtractorService
         return false;
     }
 
-    private static IEnumerable<CodeCandidate> CreateGenericCandidates(string value, string sourceMessage)
+    private static string? TryDescribeRuleRejection(
+        ChannelProfile channel,
+        string token,
+        IReadOnlyList<PrefixRule> explicitPrefixes)
+    {
+        if (channel.PrefixOnly)
+        {
+            if (explicitPrefixes.Count == 0)
+            {
+                return "Prefix only is enabled but this channel has no prefix rules.";
+            }
+
+            var matchedPrefix = explicitPrefixes.FirstOrDefault(prefix =>
+                token.StartsWith(prefix.Prefix, StringComparison.OrdinalIgnoreCase));
+            if (matchedPrefix is null)
+            {
+                return $"Prefix only rejected it. Allowed: {FormatPrefixRules(explicitPrefixes)}";
+            }
+
+            var expectedLength = matchedPrefix.Prefix.Length + matchedPrefix.SuffixLength;
+            if (token.Length != expectedLength)
+            {
+                return $"{matchedPrefix.DisplayText} expects {expectedLength} characters, OCR read {token.Length}.";
+            }
+
+            return null;
+        }
+
+        var prefixes = GetPrefixes(channel);
+        foreach (var prefix in prefixes)
+        {
+            if (!token.StartsWith(prefix.Prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var expectedLength = prefix.Prefix.Length + prefix.SuffixLength;
+            if (token.Length != expectedLength)
+            {
+                return $"{prefix.DisplayText} expects {expectedLength} characters, OCR read {token.Length}.";
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<CodeCandidate> CreateGenericCandidates(
+        string value,
+        string sourceMessage,
+        bool includeGenericAmbiguousVariants)
     {
         yield return new CodeCandidate
         {
@@ -419,6 +530,11 @@ public sealed class CodeExtractorService
             Reason = "generic-10",
             SourceMessage = sourceMessage
         };
+
+        if (!includeGenericAmbiguousVariants)
+        {
+            yield break;
+        }
 
         foreach (var normalizedValue in ExpandGenericAmbiguousVariants(value))
         {
@@ -688,6 +804,15 @@ public sealed class CodeExtractorService
             .ThenByDescending(static prefix => prefix.SuffixLength)
             .ToList();
     }
+
+    private static string FormatPrefixRules(IReadOnlyList<PrefixRule> prefixes)
+    {
+        return prefixes.Count == 0
+            ? "-"
+            : string.Join(", ", prefixes.Select(static prefix => prefix.DisplayText));
+    }
+
+    public sealed record RuleRejectedCodeCandidate(string Value, string Reason);
 
     private readonly record struct ThaiCodeAlias(string Text, char Replacement);
 }

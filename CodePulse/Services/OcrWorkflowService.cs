@@ -220,6 +220,27 @@ public sealed class OcrWorkflowService
 
         if (passCandidates.Count == 0)
         {
+            var ruleRejectedCandidates = FindRuleRejectedOcrCandidates(channel, ocrReadResult);
+            if (ruleRejectedCandidates.Count > 0)
+            {
+                var signature = suppressNoChangeLogs
+                    ? "rule-rejected"
+                    : string.Join(",", ruleRejectedCandidates.Select(static item => item.Value));
+                if (ShouldLogOcrNotice(channel.Id, OwnerTextProcessingStatus.NoCode, $"rule-rejected:{signature}"))
+                {
+                    Log(emitLog, channel, "OCR read code-like text but channel rules rejected it");
+                    Log(
+                        emitLog,
+                        channel,
+                        $"OCR rejected candidates: {string.Join(", ", ruleRejectedCandidates.Select(static item => $"{item.Value} ({item.Confidence * 100:0}%)"))}");
+                    Log(emitLog, channel, $"OCR reject reason: {ruleRejectedCandidates[0].Reason}");
+                    if (channel.PrefixOnly)
+                    {
+                        Log(emitLog, channel, "Hint: add the matching prefix rule if this code should be accepted.");
+                    }
+                }
+            }
+
             if (suspiciousBlob is not null)
             {
                 await TrySendSuspiciousOcrAlertAsync(channel, suspiciousBlob.Value.Text, suspiciousBlob.Value.Reason, cancellationToken, emitLog);
@@ -548,6 +569,41 @@ public sealed class OcrWorkflowService
         {
             Status = OwnerTextProcessingStatus.NoCode
         };
+    }
+
+    private IReadOnlyList<OcrRuleRejectedCandidate> FindRuleRejectedOcrCandidates(
+        ChannelProfile channel,
+        OcrReadResult readResult)
+    {
+        var candidates = new Dictionary<string, OcrRuleRejectedCandidate>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pass in readResult.Passes.OrderByDescending(static item => item.Confidence))
+        {
+            foreach (var rejected in _codeExtractorService.ExtractRuleRejectedCandidates(channel, pass.Text))
+            {
+                if (candidates.TryGetValue(rejected.Value, out var existing))
+                {
+                    candidates[rejected.Value] = existing with
+                    {
+                        Count = existing.Count + 1,
+                        Confidence = Math.Max(existing.Confidence, pass.Confidence)
+                    };
+                    continue;
+                }
+
+                candidates[rejected.Value] = new OcrRuleRejectedCandidate(
+                    rejected.Value,
+                    rejected.Reason,
+                    Count: 1,
+                    Confidence: pass.Confidence);
+            }
+        }
+
+        return candidates.Values
+            .OrderByDescending(static item => item.Count)
+            .ThenByDescending(static item => item.Confidence)
+            .ThenBy(static item => item.Value)
+            .Take(5)
+            .ToList();
     }
 
     private SuspiciousOcrBlob? FindSuspiciousBlob(ChannelProfile channel, OcrReadResult readResult)
@@ -1006,4 +1062,10 @@ public sealed class OcrWorkflowService
     private readonly record struct SuspiciousOcrBlob(
         string Text,
         string Reason);
+
+    private sealed record OcrRuleRejectedCandidate(
+        string Value,
+        string Reason,
+        int Count,
+        float Confidence);
 }

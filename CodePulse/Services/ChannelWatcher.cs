@@ -244,7 +244,8 @@ public sealed class ChannelWatcher
         string code,
         string sourceMessage,
         string? capturedImagePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reason = "ocr-selected")
     {
         var normalizedCode = code.Trim().ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(normalizedCode))
@@ -256,7 +257,7 @@ public sealed class ChannelWatcher
         {
             Value = normalizedCode,
             Score = int.MaxValue,
-            Reason = "ocr-selected",
+            Reason = reason,
             SourceMessage = sourceMessage
         };
 

@@ -19,6 +19,7 @@ namespace CodePulse.Wpf.ViewModels;
 public sealed class MainShellViewModel : INotifyPropertyChanged
 {
     private const int MaxVisibleLogEntries = 250;
+    private const int MinimumManualMessageLength = 8;
 
     private readonly SettingsStore _settingsStore;
     private readonly AppSettings _settings;
@@ -510,7 +511,10 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<CodeCandidate> ExtractManualCodeCandidates(ChannelProfile channel, string input)
     {
-        return _codeExtractorService.ExtractCandidates(channel, input);
+        return _codeExtractorService.ExtractCandidates(
+            channel,
+            input,
+            includeGenericAmbiguousVariants: false);
     }
 
     public async Task<OwnerTextProcessingResult> SendManualCodeAsync(ChannelProfile channel, string input)
@@ -520,10 +524,58 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
             return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoText };
         }
 
+        var trimmedInput = input.Trim();
+        if (trimmedInput.Length < MinimumManualMessageLength)
+        {
+            return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.TooShort };
+        }
+
         _appLogService.Write($"[{channel.Name}] Manual send requested");
-        var result = await _watchCoordinator.ProcessOwnerTextAsync(channel, input.Trim(), CancellationToken.None);
+        var result = await SendManualCandidatesAsync(channel, trimmedInput);
         LogManualSendResult(channel, result);
         return result;
+    }
+
+    private async Task<OwnerTextProcessingResult> SendManualCandidatesAsync(ChannelProfile channel, string input)
+    {
+        var candidates = ExtractManualCodeCandidates(channel, input);
+        if (candidates.Count == 0)
+        {
+            return new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoCode };
+        }
+
+        var dispatchedCodes = new List<string>();
+        OwnerTextProcessingResult? firstSkippedResult = null;
+        foreach (var candidate in candidates)
+        {
+            var result = await _watchCoordinator.ProcessDetectedCodeAsync(
+                channel,
+                candidate.Value,
+                input,
+                capturedImagePath: null,
+                CancellationToken.None,
+                reason: "manual-selected");
+
+            if (result.Status == OwnerTextProcessingStatus.Dispatched)
+            {
+                dispatchedCodes.Add(result.Code ?? candidate.Value);
+                continue;
+            }
+
+            firstSkippedResult ??= result;
+        }
+
+        if (dispatchedCodes.Count > 0)
+        {
+            return new OwnerTextProcessingResult
+            {
+                Status = OwnerTextProcessingStatus.Dispatched,
+                Code = dispatchedCodes[0],
+                Codes = dispatchedCodes
+            };
+        }
+
+        return firstSkippedResult ?? new OwnerTextProcessingResult { Status = OwnerTextProcessingStatus.NoCode };
     }
 
     public string GetLastCommentScannerVideoUrl(ChannelProfile channel)

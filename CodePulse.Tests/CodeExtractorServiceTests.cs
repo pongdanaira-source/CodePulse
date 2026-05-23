@@ -253,6 +253,24 @@ public sealed class CodeExtractorServiceTests
     }
 
     [Fact]
+    public void ExtractCandidates_CanDisableGenericAmbiguousVariantsForManualSend()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "Generic"
+        };
+
+        var candidates = service.ExtractCandidates(
+            channel,
+            "H6GXCVIKMZ",
+            includeGenericAmbiguousVariants: false);
+
+        Assert.Contains(candidates, candidate => candidate.Value == "H6GXCVIKMZ");
+        Assert.DoesNotContain(candidates, candidate => candidate.Value == "H69XCVIKMZ");
+    }
+
+    [Fact]
     public void ExtractCandidates_DoesNotBridgeSeparatedThaiAliasWhenItWouldNotFormCode()
     {
         var service = new CodeExtractorService();
@@ -265,5 +283,42 @@ public sealed class CodeExtractorServiceTests
         var candidates = service.ExtractCandidates(channel, "KOLCHICKTT เอ ภารกิจต่อไป");
 
         Assert.DoesNotContain(candidates, candidate => candidate.Value == "KOLCHICKTTA");
+    }
+
+    [Fact]
+    public void ExtractRuleRejectedCandidates_ExplainsPrefixOnlyMiss()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "Tournament",
+            Prefixes = ["RPL:8", "ULTI:8", "GCCULTI"],
+            PrefixOnly = true
+        };
+
+        var rejected = service.ExtractRuleRejectedCandidates(channel, "GCCSUSISXGF");
+
+        var candidate = Assert.Single(rejected);
+        Assert.Equal("GCCSUSISXGF", candidate.Value);
+        Assert.Contains("Prefix only rejected", candidate.Reason);
+        Assert.Contains("RPL:8", candidate.Reason);
+    }
+
+    [Fact]
+    public void ExtractRuleRejectedCandidates_ExplainsPrefixLengthMiss()
+    {
+        var service = new CodeExtractorService();
+        var channel = new ChannelProfile
+        {
+            Name = "Tournament",
+            Prefixes = ["GCC:8"],
+            PrefixOnly = true
+        };
+
+        var rejected = service.ExtractRuleRejectedCandidates(channel, "GCCSUSISXGEF");
+
+        var candidate = Assert.Single(rejected);
+        Assert.Equal("GCCSUSISXGEF", candidate.Value);
+        Assert.Contains("expects 11 characters", candidate.Reason);
     }
 }
