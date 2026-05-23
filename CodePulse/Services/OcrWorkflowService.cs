@@ -117,9 +117,19 @@ public sealed class OcrWorkflowService
                 .Distinct(StringComparer.Ordinal));
 
             Log(emitLog, channel, $"OCR.space ได้ข้อความ: {TrimForDebugLog(mergedText)}");
+            var reconciledOcrSpaceResult = ReconcileOcrSpaceWithTesseract(
+                channel,
+                ocrReadResult,
+                ocrSpaceResult,
+                out var reconciliationMessage);
+            if (!string.IsNullOrWhiteSpace(reconciliationMessage))
+            {
+                Log(emitLog, channel, reconciliationMessage);
+            }
+
             return await EvaluateOcrReadResultAsync(
                 channel,
-                ocrSpaceResult,
+                reconciledOcrSpaceResult,
                 cancellationToken,
                 emitLog,
                 suppressNoChangeLogs: false,
@@ -868,6 +878,175 @@ public sealed class OcrWorkflowService
         };
     }
 
+    private OcrReadResult ReconcileOcrSpaceWithTesseract(
+        ChannelProfile channel,
+        OcrReadResult tesseractReadResult,
+        OcrReadResult ocrSpaceReadResult,
+        out string? message)
+    {
+        message = null;
+
+        var ocrSpaceCandidates = BuildOcrCandidateSupports(
+            channel,
+            ocrSpaceReadResult,
+            includeRawText: false);
+        if (ocrSpaceCandidates.Count == 0)
+        {
+            return ocrSpaceReadResult;
+        }
+
+        var tesseractCandidates = BuildOcrCandidateSupports(
+            channel,
+            tesseractReadResult,
+            includeRawText: true);
+        if (tesseractCandidates.Count == 0)
+        {
+            return ocrSpaceReadResult;
+        }
+
+        foreach (var ocrSpaceCandidate in ocrSpaceCandidates
+                     .OrderByDescending(static item => item.Count)
+                     .ThenByDescending(static item => item.BestConfidence))
+        {
+            var replacement = tesseractCandidates
+                .Where(item => !item.Code.Equals(ocrSpaceCandidate.Code, StringComparison.OrdinalIgnoreCase))
+                .Where(item => AreIOrLOnlyVariants(item.Code, ocrSpaceCandidate.Code))
+                .Where(item => HasStrongTesseractShapeSupport(item, ocrSpaceCandidate))
+                .OrderByDescending(static item => item.RawCount)
+                .ThenByDescending(static item => item.Count)
+                .ThenByDescending(static item => item.BestConfidence)
+                .FirstOrDefault();
+
+            if (replacement is null)
+            {
+                continue;
+            }
+
+            message = $"OCR.space I/L conflict: using Tesseract shape candidate {replacement.Code} instead of {ocrSpaceCandidate.Code}";
+            return new OcrReadResult
+            {
+                TotalElapsedMs = ocrSpaceReadResult.TotalElapsedMs,
+                StageMetrics = ocrSpaceReadResult.StageMetrics,
+                Passes =
+                [
+                    new OcrPassResult
+                    {
+                        PassName = "ocr.reconcile/tesseract-shape",
+                        Text = replacement.Code,
+                        RawText = replacement.Code,
+                        Confidence = 1.0f
+                    }
+                ]
+            };
+        }
+
+        return ocrSpaceReadResult;
+    }
+
+    private IReadOnlyList<OcrCandidateSupport> BuildOcrCandidateSupports(
+        ChannelProfile channel,
+        OcrReadResult readResult,
+        bool includeRawText)
+    {
+        var supports = new Dictionary<string, OcrCandidateSupportBuilder>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pass in readResult.Passes)
+        {
+            AddOcrCandidateSupports(channel, supports, pass.Text, pass.Confidence, isRawText: false);
+
+            if (!includeRawText ||
+                string.IsNullOrWhiteSpace(pass.RawText) ||
+                pass.RawText.Equals(pass.Text, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            AddOcrCandidateSupports(channel, supports, pass.RawText, pass.Confidence, isRawText: true);
+        }
+
+        return supports.Values
+            .Select(static item => new OcrCandidateSupport(
+                item.Code,
+                item.Count,
+                item.RawCount,
+                item.BestConfidence))
+            .OrderByDescending(static item => item.Count)
+            .ThenByDescending(static item => item.RawCount)
+            .ThenByDescending(static item => item.BestConfidence)
+            .ToList();
+    }
+
+    private void AddOcrCandidateSupports(
+        ChannelProfile channel,
+        IDictionary<string, OcrCandidateSupportBuilder> supports,
+        string text,
+        float confidence,
+        bool isRawText)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        foreach (var candidate in _codeExtractorService.ExtractCandidates(channel, text, normalizeThaiCodeAliases: false))
+        {
+            if (!supports.TryGetValue(candidate.Value, out var support))
+            {
+                support = new OcrCandidateSupportBuilder(candidate.Value);
+                supports[candidate.Value] = support;
+            }
+
+            support.Count++;
+            if (isRawText)
+            {
+                support.RawCount++;
+            }
+
+            support.BestConfidence = Math.Max(support.BestConfidence, confidence);
+        }
+    }
+
+    private static bool HasStrongTesseractShapeSupport(
+        OcrCandidateSupport tesseractCandidate,
+        OcrCandidateSupport ocrSpaceCandidate)
+    {
+        return tesseractCandidate.RawCount >= 2 ||
+               tesseractCandidate.Count >= Math.Max(2, ocrSpaceCandidate.Count + 1) ||
+               tesseractCandidate.BestConfidence >= MinimumOcrConfidence;
+    }
+
+    private static bool AreIOrLOnlyVariants(string left, string right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        var hasDifference = false;
+        for (var index = 0; index < left.Length; index++)
+        {
+            var leftChar = char.ToUpperInvariant(left[index]);
+            var rightChar = char.ToUpperInvariant(right[index]);
+            if (leftChar == rightChar)
+            {
+                continue;
+            }
+
+            if (!IsIOrLRiskyCharacter(leftChar) || !IsIOrLRiskyCharacter(rightChar))
+            {
+                return false;
+            }
+
+            hasDifference = true;
+        }
+
+        return hasDifference;
+    }
+
+    private static bool IsIOrLRiskyCharacter(char value)
+    {
+        return value is 'I' or 'L' or '1';
+    }
+
     private static bool ShouldDispatchMultipleOcrCodes(
         string providerName,
         string sourceText,
@@ -1080,4 +1259,21 @@ public sealed class OcrWorkflowService
         string Reason,
         int Count,
         float Confidence);
+
+    private sealed record OcrCandidateSupport(
+        string Code,
+        int Count,
+        int RawCount,
+        float BestConfidence);
+
+    private sealed class OcrCandidateSupportBuilder(string code)
+    {
+        public string Code { get; } = code;
+
+        public int Count { get; set; }
+
+        public int RawCount { get; set; }
+
+        public float BestConfidence { get; set; }
+    }
 }

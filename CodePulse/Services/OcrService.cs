@@ -416,7 +416,7 @@ public sealed class OcrService
         engine.DefaultPageSegMode = pageSegMode;
         using var page = engine.Process(pix);
         var text = NormalizeOcrText(page.GetText());
-        var adjustedText = ApplyRoundZeroShapeHint(text, ExtractSymbolShapes(page));
+        var adjustedText = ApplyOcrShapeHints(text, ExtractSymbolShapes(page));
 
         return new OcrPassResult
         {
@@ -455,7 +455,7 @@ public sealed class OcrService
         return symbols;
     }
 
-    private static string ApplyRoundZeroShapeHint(string text, IReadOnlyList<OcrSymbolShape> symbols)
+    private static string ApplyOcrShapeHints(string text, IReadOnlyList<OcrSymbolShape> symbols)
     {
         if (string.IsNullOrWhiteSpace(text) || symbols.Count == 0)
         {
@@ -488,12 +488,7 @@ public sealed class OcrService
         for (var index = 0; index < adjusted.Length && index < symbols.Count; index++)
         {
             var current = adjusted[index];
-            if (current is not ('O' or '0'))
-            {
-                continue;
-            }
-
-            var replacement = ClassifyRoundZeroByShape(current, symbols[index]);
+            var replacement = ClassifyOcrCharacterByShape(current, symbols[index]);
             if (replacement == current)
             {
                 continue;
@@ -506,7 +501,7 @@ public sealed class OcrService
         return didAdjust ? new string(adjusted) : text;
     }
 
-    private static char ClassifyRoundZeroByShape(char current, OcrSymbolShape shape)
+    private static char ClassifyOcrCharacterByShape(char current, OcrSymbolShape shape)
     {
         if (shape.Width < 4 || shape.Height < 4)
         {
@@ -518,6 +513,7 @@ public sealed class OcrService
         {
             '0' when aspectRatio >= 0.82f => 'O',
             'O' when aspectRatio <= 0.72f => '0',
+            'L' when aspectRatio <= 0.36f => 'I',
             _ => current
         };
     }
