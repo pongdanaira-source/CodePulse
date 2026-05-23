@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Diagnostics;
+using System.Text;
 using CodePulse.Models;
 using Tesseract;
 
@@ -201,6 +202,7 @@ public sealed class OcrService
                 {
                     PassName = $"ocr.space/{index}",
                     Text = text,
+                    RawText = text,
                     Confidence = 1.0f
                 });
                 index++;
@@ -224,6 +226,8 @@ public sealed class OcrService
 
             _tesseractEngine = new TesseractEngine(_tessDataPath, "eng", EngineMode.Default);
             _tesseractEngine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+            _tesseractEngine.SetVariable("load_system_dawg", "0");
+            _tesseractEngine.SetVariable("load_freq_dawg", "0");
             _tesseractEngine.SetVariable("preserve_interword_spaces", "0");
             return _tesseractEngine;
         }
@@ -275,9 +279,16 @@ public sealed class OcrService
 
     private static string NormalizeOcrText(string? value)
     {
-        return (value ?? string.Empty)
-            .ReplaceLineEndings(string.Empty)
-            .Replace(" ", string.Empty)
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value
+            .Normalize(NormalizationForm.FormKC)
+            .ToUpperInvariant()
+            .Where(static character => !char.IsWhiteSpace(character))
+            .ToArray())
             .Trim();
     }
 
@@ -285,6 +296,8 @@ public sealed class OcrService
     {
         var grayscale = ToGrayscale(sourceBitmap);
         var contrastStrong = AdjustContrast(grayscale, 1.8f);
+        var uppercaseTightBinary = CreateUppercaseCodeVariant(sourceBitmap, targetHeight: 72, useNearest: false);
+        var uppercaseTightBinaryNearest = CreateUppercaseCodeVariant(sourceBitmap, targetHeight: 96, useNearest: true);
         var upscale2x = Upscale(sourceBitmap, 2);
         var crop = CropMargins(sourceBitmap, 8);
         var grayscaleUpscale2x = Upscale(grayscale, 2);
@@ -309,6 +322,8 @@ public sealed class OcrService
         return
         [
             [
+                new OcrVariant("uppercase-tight-binary", uppercaseTightBinary),
+                new OcrVariant("uppercase-tight-binary-nearest", uppercaseTightBinaryNearest),
                 new OcrVariant("original", CloneBitmap(sourceBitmap)),
                 new OcrVariant("crop", crop),
                 new OcrVariant("grayscale", grayscale),
@@ -401,13 +416,359 @@ public sealed class OcrService
         engine.DefaultPageSegMode = pageSegMode;
         using var page = engine.Process(pix);
         var text = NormalizeOcrText(page.GetText());
+        var adjustedText = ApplyRoundZeroShapeHint(text, ExtractSymbolShapes(page));
 
         return new OcrPassResult
         {
             PassName = $"{passName}/{pageSegMode}",
-            Text = text,
+            Text = adjustedText,
+            RawText = text,
             Confidence = page.GetMeanConfidence()
         };
+    }
+
+    private static IReadOnlyList<OcrSymbolShape> ExtractSymbolShapes(Page page)
+    {
+        using var iterator = page.GetIterator();
+        iterator.Begin();
+
+        var symbols = new List<OcrSymbolShape>();
+        do
+        {
+            var symbolText = NormalizeOcrText(iterator.GetText(PageIteratorLevel.Symbol));
+            if (symbolText.Length != 1 ||
+                !IsAsciiCodeCharacter(symbolText[0]) ||
+                !iterator.TryGetBoundingBox(PageIteratorLevel.Symbol, out var bounds) ||
+                bounds.Width <= 0 ||
+                bounds.Height <= 0)
+            {
+                continue;
+            }
+
+            symbols.Add(new OcrSymbolShape(
+                char.ToUpperInvariant(symbolText[0]),
+                bounds.Width,
+                bounds.Height));
+        }
+        while (iterator.Next(PageIteratorLevel.Symbol));
+
+        return symbols;
+    }
+
+    private static string ApplyRoundZeroShapeHint(string text, IReadOnlyList<OcrSymbolShape> symbols)
+    {
+        if (string.IsNullOrWhiteSpace(text) || symbols.Count == 0)
+        {
+            return text;
+        }
+
+        var sourceText = text.ToUpperInvariant();
+        var observedText = new string(symbols.Select(static symbol => symbol.Value).ToArray());
+        if (symbols.Count != sourceText.Length)
+        {
+            if (!LooksLikeShapeCorrectableCode(observedText))
+            {
+                return text;
+            }
+
+            sourceText = observedText;
+        }
+        else if (!observedText.Equals(sourceText, StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        if (!LooksLikeShapeCorrectableCode(sourceText))
+        {
+            return text;
+        }
+
+        var adjusted = sourceText.ToUpperInvariant().ToCharArray();
+        var didAdjust = false;
+        for (var index = 0; index < adjusted.Length && index < symbols.Count; index++)
+        {
+            var current = adjusted[index];
+            if (current is not ('O' or '0'))
+            {
+                continue;
+            }
+
+            var replacement = ClassifyRoundZeroByShape(current, symbols[index]);
+            if (replacement == current)
+            {
+                continue;
+            }
+
+            adjusted[index] = replacement;
+            didAdjust = true;
+        }
+
+        return didAdjust ? new string(adjusted) : text;
+    }
+
+    private static char ClassifyRoundZeroByShape(char current, OcrSymbolShape shape)
+    {
+        if (shape.Width < 4 || shape.Height < 4)
+        {
+            return current;
+        }
+
+        var aspectRatio = shape.Width / (float)shape.Height;
+        return current switch
+        {
+            '0' when aspectRatio >= 0.82f => 'O',
+            'O' when aspectRatio <= 0.72f => '0',
+            _ => current
+        };
+    }
+
+    private static bool LooksLikeShapeCorrectableCode(string text)
+    {
+        return text.Length is >= 8 and <= 32 &&
+               text.All(IsAsciiCodeCharacter);
+    }
+
+    private static bool IsAsciiCodeCharacter(char character)
+    {
+        return char.IsAsciiLetterUpper(character) || char.IsDigit(character);
+    }
+
+    private static Bitmap CreateUppercaseCodeVariant(Bitmap source, int targetHeight, bool useNearest)
+    {
+        using var sourceBitmap = CloneAs32BppArgb(source);
+        var backgroundIsDark = EstimateEdgeBrightness(sourceBitmap) < 128;
+        var bounds = FindLikelyCodeBounds(sourceBitmap, backgroundIsDark);
+        if (bounds is null)
+        {
+            return useNearest
+                ? UpscaleNearest(source, 2)
+                : Upscale(source, 2);
+        }
+
+        using var binaryCrop = RenderBinaryCodeCrop(sourceBitmap, bounds.Value, backgroundIsDark);
+        return UpscaleToMinimumHeight(binaryCrop, targetHeight, useNearest);
+    }
+
+    private static double EstimateEdgeBrightness(Bitmap source)
+    {
+        using var sourceBitmap = CloneAs32BppArgb(source);
+        var data = sourceBitmap.LockBits(
+            new Rectangle(0, 0, sourceBitmap.Width, sourceBitmap.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var bytes = new byte[Math.Abs(data.Stride) * sourceBitmap.Height];
+            Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+            long total = 0;
+            var count = 0;
+
+            for (var y = 0; y < sourceBitmap.Height; y++)
+            {
+                for (var x = 0; x < sourceBitmap.Width; x++)
+                {
+                    if (x != 0 &&
+                        y != 0 &&
+                        x != sourceBitmap.Width - 1 &&
+                        y != sourceBitmap.Height - 1)
+                    {
+                        continue;
+                    }
+
+                    var index = (y * data.Stride) + (x * 4);
+                    total += GetPixelBrightness(bytes, index);
+                    count++;
+                }
+            }
+
+            return count == 0 ? 0 : total / (double)count;
+        }
+        finally
+        {
+            sourceBitmap.UnlockBits(data);
+        }
+    }
+
+    private static Rectangle? FindLikelyCodeBounds(Bitmap source, bool backgroundIsDark)
+    {
+        var data = source.LockBits(
+            new Rectangle(0, 0, source.Width, source.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var bytes = new byte[Math.Abs(data.Stride) * source.Height];
+            Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+
+            var rowCounts = new int[source.Height];
+            var columnCounts = new int[source.Width];
+            var foregroundPixels = 0;
+            for (var y = 0; y < source.Height; y++)
+            {
+                var row = y * data.Stride;
+                for (var x = 0; x < source.Width; x++)
+                {
+                    var index = row + (x * 4);
+                    if (!IsLikelyCodeForeground(bytes, index, backgroundIsDark))
+                    {
+                        continue;
+                    }
+
+                    rowCounts[y]++;
+                    columnCounts[x]++;
+                    foregroundPixels++;
+                }
+            }
+
+            if (foregroundPixels < 6)
+            {
+                return null;
+            }
+
+            var minY = FindFirstCount(rowCounts, minimum: 2, maximumExclusive: (int)(source.Width * 0.85));
+            var maxY = FindLastCount(rowCounts, minimum: 2, maximumExclusive: (int)(source.Width * 0.85));
+            if (minY < 0 || maxY < 0)
+            {
+                minY = FindFirstCount(rowCounts, minimum: 2, maximumExclusive: int.MaxValue);
+                maxY = FindLastCount(rowCounts, minimum: 2, maximumExclusive: int.MaxValue);
+            }
+
+            var minX = FindFirstCount(columnCounts, minimum: 1, maximumExclusive: (int)(source.Height * 0.95));
+            var maxX = FindLastCount(columnCounts, minimum: 1, maximumExclusive: (int)(source.Height * 0.95));
+            if (minX < 0 || maxX < 0)
+            {
+                minX = FindFirstCount(columnCounts, minimum: 1, maximumExclusive: int.MaxValue);
+                maxX = FindLastCount(columnCounts, minimum: 1, maximumExclusive: int.MaxValue);
+            }
+
+            if (minX < 0 || maxX < 0 || minY < 0 || maxY < 0)
+            {
+                return null;
+            }
+
+            var bounds = Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+            return ExpandRectangle(bounds, source.Width, source.Height, padding: 4);
+        }
+        finally
+        {
+            source.UnlockBits(data);
+        }
+    }
+
+    private static Bitmap RenderBinaryCodeCrop(Bitmap source, Rectangle bounds, bool backgroundIsDark)
+    {
+        var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
+        var sourceData = source.LockBits(
+            new Rectangle(0, 0, source.Width, source.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb);
+        var targetData = bitmap.LockBits(
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var sourceBytes = new byte[Math.Abs(sourceData.Stride) * source.Height];
+            var targetBytes = new byte[Math.Abs(targetData.Stride) * bitmap.Height];
+            Marshal.Copy(sourceData.Scan0, sourceBytes, 0, sourceBytes.Length);
+
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                var sourceRow = (bounds.Top + y) * sourceData.Stride;
+                var targetRow = y * targetData.Stride;
+                for (var x = 0; x < bitmap.Width; x++)
+                {
+                    var sourceIndex = sourceRow + ((bounds.Left + x) * 4);
+                    var targetIndex = targetRow + (x * 4);
+                    var isForeground = IsLikelyCodeForeground(sourceBytes, sourceIndex, backgroundIsDark);
+                    var value = isForeground ? (byte)0 : (byte)255;
+
+                    targetBytes[targetIndex] = value;
+                    targetBytes[targetIndex + 1] = value;
+                    targetBytes[targetIndex + 2] = value;
+                    targetBytes[targetIndex + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(targetBytes, 0, targetData.Scan0, targetBytes.Length);
+        }
+        finally
+        {
+            source.UnlockBits(sourceData);
+            bitmap.UnlockBits(targetData);
+        }
+
+        return bitmap;
+    }
+
+    private static Bitmap UpscaleToMinimumHeight(Bitmap source, int targetHeight, bool useNearest)
+    {
+        var scale = Math.Max(1, (int)Math.Ceiling(targetHeight / (double)Math.Max(1, source.Height)));
+        return useNearest ? UpscaleNearest(source, scale) : Upscale(source, scale);
+    }
+
+    private static Rectangle ExpandRectangle(Rectangle bounds, int maxWidth, int maxHeight, int padding)
+    {
+        var left = Math.Max(0, bounds.Left - padding);
+        var top = Math.Max(0, bounds.Top - padding);
+        var right = Math.Min(maxWidth, bounds.Right + padding);
+        var bottom = Math.Min(maxHeight, bounds.Bottom + padding);
+        return Rectangle.FromLTRB(left, top, Math.Max(left + 1, right), Math.Max(top + 1, bottom));
+    }
+
+    private static int FindFirstCount(IReadOnlyList<int> counts, int minimum, int maximumExclusive)
+    {
+        for (var index = 0; index < counts.Count; index++)
+        {
+            if (counts[index] >= minimum && counts[index] < maximumExclusive)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindLastCount(IReadOnlyList<int> counts, int minimum, int maximumExclusive)
+    {
+        for (var index = counts.Count - 1; index >= 0; index--)
+        {
+            if (counts[index] >= minimum && counts[index] < maximumExclusive)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsLikelyCodeForeground(byte[] bytes, int index, bool backgroundIsDark)
+    {
+        var blue = bytes[index];
+        var green = bytes[index + 1];
+        var red = bytes[index + 2];
+        var alpha = bytes[index + 3];
+        if (alpha < 16)
+        {
+            return false;
+        }
+
+        var max = Math.Max(red, Math.Max(green, blue));
+        var min = Math.Min(red, Math.Min(green, blue));
+        var saturation = max - min;
+        var gray = (red + green + blue) / 3;
+
+        return backgroundIsDark
+            ? max >= 95 && (saturation >= 20 || max >= 165)
+            : gray <= 185 && (saturation >= 15 || gray <= 140);
+    }
+
+    private static int GetPixelBrightness(byte[] bytes, int index)
+    {
+        return Math.Max(bytes[index + 2], Math.Max(bytes[index + 1], bytes[index]));
     }
 
     private static Bitmap CloneBitmap(Bitmap source)
@@ -837,4 +1198,6 @@ public sealed class OcrService
     }
 
     private sealed record OcrVariant(string Name, Bitmap Bitmap);
+
+    private readonly record struct OcrSymbolShape(char Value, int Width, int Height);
 }

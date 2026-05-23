@@ -15,6 +15,8 @@ public sealed class OcrPassResult
 
     public string Text { get; init; } = string.Empty;
 
+    public string RawText { get; init; } = string.Empty;
+
     public float Confidence { get; init; }
 }
 

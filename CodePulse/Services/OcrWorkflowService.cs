@@ -178,7 +178,7 @@ public sealed class OcrWorkflowService
 
             foreach (var pass in ocrReadResult.Passes.OrderByDescending(static item => item.Confidence))
             {
-                Log(emitLog, channel, $"OCR pass {pass.PassName} | {(pass.Confidence * 100):0}% | {TrimForDebugLog(pass.Text)}");
+                Log(emitLog, channel, $"OCR pass {pass.PassName} | {(pass.Confidence * 100):0}% | {FormatOcrPassText(pass)}");
             }
         }
 
@@ -317,7 +317,7 @@ public sealed class OcrWorkflowService
             Log(
                 emitLog,
                 channel,
-                $"OCR selected {selectedPass.Pass.PassName} | {(selectedPass.Pass.Confidence * 100):0}% | {selectedGroup.Code} | source {TrimForDebugLog(selectedPass.Pass.Text)}");
+                $"OCR selected {selectedPass.Pass.PassName} | {(selectedPass.Pass.Confidence * 100):0}% | {selectedGroup.Code} | source {FormatOcrPassText(selectedPass.Pass)}");
             LogRiskyCharacters(emitLog, channel, selectedGroup.Code, "OCR risky chars");
         }
 
@@ -916,6 +916,18 @@ public sealed class OcrWorkflowService
 
         var flattened = value.ReplaceLineEndings(" ").Trim();
         return flattened.Length <= 160 ? flattened : flattened[..160] + "...";
+    }
+
+    private static string FormatOcrPassText(OcrPassResult pass)
+    {
+        var text = TrimForDebugLog(pass.Text);
+        if (string.IsNullOrWhiteSpace(pass.RawText) ||
+            pass.RawText.Equals(pass.Text, StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        return $"{text} | shape from {TrimForDebugLog(pass.RawText)}";
     }
 
     private static string SummarizeException(Exception exception)
