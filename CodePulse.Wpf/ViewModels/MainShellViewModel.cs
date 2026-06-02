@@ -652,10 +652,22 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var existing = _settings.CommentTimers.FirstOrDefault(item => item.Id == normalized.Id);
         if (existing is null)
         {
+            if (normalized.Enabled)
+            {
+                normalized.LastTriggeredDate = string.Empty;
+                normalized.LastStatus = "Waiting";
+            }
+
             _settings.CommentTimers.Add(normalized);
         }
         else
         {
+            if (ShouldResetCommentTimerRunState(existing, normalized))
+            {
+                normalized.LastTriggeredDate = string.Empty;
+                normalized.LastStatus = "Waiting";
+            }
+
             ApplyCommentTimer(normalized, existing);
         }
 
@@ -712,7 +724,10 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
         if (!timer.Enabled)
         {
-            return "Disabled";
+            return string.IsNullOrWhiteSpace(timer.LastStatus) ||
+                   string.Equals(timer.LastStatus, "Waiting", StringComparison.OrdinalIgnoreCase)
+                ? "Used"
+                : timer.LastStatus;
         }
 
         var today = GetTodayKey();
@@ -957,11 +972,19 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         }
 
         var now = DateTime.Now;
-        var today = GetTodayKey();
+        var disabledTriggeredTimers = false;
         foreach (var timer in _settings.CommentTimers.Where(static item => item.Enabled).ToList())
         {
-            if (string.Equals(timer.LastTriggeredDate, today, StringComparison.Ordinal))
+            if (!string.IsNullOrWhiteSpace(timer.LastTriggeredDate))
             {
+                timer.Enabled = false;
+                if (string.IsNullOrWhiteSpace(timer.LastStatus) ||
+                    string.Equals(timer.LastStatus, "Waiting", StringComparison.OrdinalIgnoreCase))
+                {
+                    timer.LastStatus = "Used";
+                }
+
+                disabledTriggeredTimers = true;
                 continue;
             }
 
@@ -978,6 +1001,11 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
 
             StartCommentTimer(timer, manualStart: false);
         }
+
+        if (disabledTriggeredTimers)
+        {
+            _settingsStore.Save(_settings);
+        }
     }
 
     private bool StartCommentTimer(CommentTimerProfile timer, bool manualStart)
@@ -985,27 +1013,21 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var channel = _settings.Channels.FirstOrDefault(item => item.Id == timer.ChannelId);
         if (channel is null)
         {
-            timer.LastStatus = "Channel not found";
-            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
-            _settingsStore.Save(_settings);
+            MarkCommentTimerAttempt(timer, manualStart, "Channel not found", consumeManualStart: false);
             _appLogService.Write("[Comment Timer] channel not found");
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(timer.VideoUrl))
         {
-            timer.LastStatus = "Missing video URL";
-            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
-            _settingsStore.Save(_settings);
+            MarkCommentTimerAttempt(timer, manualStart, "Missing video URL", consumeManualStart: false);
             _appLogService.Write($"[{channel.Name}] Comment Timer skipped: missing video URL");
             return false;
         }
 
         if (_commentScannerService.IsRunning(channel.Id))
         {
-            timer.LastStatus = "Skipped, scanner already running";
-            timer.LastTriggeredDate = manualStart ? timer.LastTriggeredDate : GetTodayKey();
-            _settingsStore.Save(_settings);
+            MarkCommentTimerAttempt(timer, manualStart, "Skipped, scanner already running", consumeManualStart: false);
             _appLogService.Write($"[{channel.Name}] Comment Timer skipped: scanner already running");
             return false;
         }
@@ -1014,8 +1036,7 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         var pollSeconds = Math.Clamp(timer.PollIntervalSeconds, 1, 60);
         timer.DurationSeconds = durationSeconds;
         timer.PollIntervalSeconds = pollSeconds;
-        timer.LastTriggeredDate = GetTodayKey();
-        timer.LastStatus = $"Running until {DateTime.Now.AddSeconds(durationSeconds):HH:mm:ss}";
+        timer.LastStatus = "Starting";
         _settings.CommentScannerLastVideoUrls[channel.Id] = timer.VideoUrl.Trim();
         _settingsStore.Save(_settings);
 
@@ -1035,14 +1056,33 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         if (!started)
         {
             _activeCommentTimerByChannel.Remove(channel.Id);
-            timer.LastStatus = "Start failed";
-            _settingsStore.Save(_settings);
+            MarkCommentTimerAttempt(timer, manualStart, "Start failed", consumeManualStart: false);
             return false;
         }
 
+        timer.Enabled = false;
+        timer.LastTriggeredDate = GetTodayKey();
+        timer.LastStatus = $"Running until {DateTime.Now.AddSeconds(durationSeconds):HH:mm:ss}";
+        _settingsStore.Save(_settings);
         _appLogService.Write($"[{channel.Name}] Comment Timer started: {pollSeconds}s polling for {durationSeconds / 60.0:0.#}m");
         RefreshChannelsOnUiThread();
         return true;
+    }
+
+    private void MarkCommentTimerAttempt(
+        CommentTimerProfile timer,
+        bool manualStart,
+        string status,
+        bool consumeManualStart)
+    {
+        timer.LastStatus = status;
+        if (!manualStart || consumeManualStart)
+        {
+            timer.Enabled = false;
+            timer.LastTriggeredDate = GetTodayKey();
+        }
+
+        _settingsStore.Save(_settings);
     }
 
     private void HandleCommentScannerCompleted(CommentScannerCompletedEvent completedEvent)
@@ -1403,6 +1443,21 @@ public sealed class MainShellViewModel : INotifyPropertyChanged
         destination.Enabled = source.Enabled;
         destination.LastTriggeredDate = source.LastTriggeredDate;
         destination.LastStatus = source.LastStatus;
+    }
+
+    private static bool ShouldResetCommentTimerRunState(CommentTimerProfile existing, CommentTimerProfile updated)
+    {
+        if (!updated.Enabled)
+        {
+            return false;
+        }
+
+        return !existing.Enabled ||
+               !string.IsNullOrWhiteSpace(existing.LastTriggeredDate) ||
+               !string.Equals(existing.VideoUrl.Trim(), updated.VideoUrl.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !string.Equals(existing.StartTime, updated.StartTime, StringComparison.Ordinal) ||
+               existing.DurationSeconds != updated.DurationSeconds ||
+               existing.PollIntervalSeconds != updated.PollIntervalSeconds;
     }
 
     private static ChannelProfile CloneChannel(ChannelProfile source)

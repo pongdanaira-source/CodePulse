@@ -108,7 +108,7 @@ public partial class CommentTimerWindow : Window
                 timer.StartTime,
                 $"{Math.Clamp(timer.DurationSeconds, 30, 3600) / 60.0:0.#}m",
                 $"{Math.Clamp(timer.PollIntervalSeconds, 1, 60)}s",
-                timer.Enabled ? "On" : "Off",
+                timer.Enabled ? "Pending" : "Used",
                 _getStatus(timer)));
         }
 
@@ -303,7 +303,7 @@ public partial class CommentTimerWindow : Window
     {
         ClearEditor(preserveInput: true);
         StatusTextBlock.Text = "New";
-        StatusHintTextBlock.Text = "Create another scheduled scan for this link.";
+        StatusHintTextBlock.Text = "Create another one-shot scan for this link.";
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
@@ -341,7 +341,7 @@ public partial class CommentTimerWindow : Window
         {
             ClearEditor(preserveInput: true);
             StatusTextBlock.Text = "New";
-            StatusHintTextBlock.Text = "Create another scheduled scan for this link.";
+            StatusHintTextBlock.Text = "Create another one-shot scan for this link.";
             StartTimeTextBox.Focus();
             StartTimeTextBox.SelectAll();
             e.Handled = true;

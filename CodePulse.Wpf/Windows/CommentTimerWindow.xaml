@@ -276,7 +276,7 @@
                                 <CheckBox x:Name="EnabledCheckBox"
                                           Margin="14,0,0,0"
                                           VerticalAlignment="Center"
-                                          Content="Enabled"
+                                          Content="Pending"
                                           IsChecked="True"
                                           Checked="Editor_OnChanged"
                                           Unchecked="Editor_OnChanged" />
@@ -405,7 +405,7 @@
                                VerticalAlignment="Center"
                                Foreground="{StaticResource TextSecondaryBrush}"
                                FontSize="12"
-                               Text="Multiple times per channel."
+                               Text="Each saved time runs once, then turns off."
                                TextWrapping="Wrap" />
 
                     <Button Grid.Column="1"
